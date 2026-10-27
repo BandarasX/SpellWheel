@@ -38,6 +38,14 @@ text_shadows = true
 # The format is Red, Green, Blue, Alpha (Opacity).
 icon_tint = [1.0, 1.0, 1.0, 1.0]
 
+# Applies a tint to the backgrounds of the icons in the spell / item wheel. Default is [1.0, 1.0, 1.0, 1.0].
+# The format is Red, Green, Blue, Alpha (Opacity).
+icon_background_tint = [1.0, 1.0, 1.0, 1.0]
+
+# Applies a tint to the names of the spells / items in the wheel. Default is [1.0, 1.0, 1.0, 1.0].
+# The format is Red, Green, Blue, Alpha (Opacity).
+name_tint = [1.0, 1.0, 1.0, 1.0]
+
 # The amount to scale the item name font size. Default is 1.
 font_scale_multiplier = 1.0
 

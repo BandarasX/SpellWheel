@@ -1,6 +1,6 @@
 [package]
 name = "spellwheel"
-version = "1.6.1-patch1"
+version = "1.6.2"
 edition = "2024"
 
 [lib]
@@ -37,3 +37,4 @@ image_dds = "0.7.2"
 roxmltree = "0.21.1"
 regex = "1.12.4"
 bitfield = "0.20.0"
+ordered-float = "5.5.1"

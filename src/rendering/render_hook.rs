@@ -12,6 +12,7 @@ use crate::settings::Settings;
 use crate::{guard, set_hwnd, set_selected_quick_item_index, set_selected_spell_index};
 use hudhook::{ImguiRenderLoop, RenderContext};
 use imgui::{Context, Ui, WindowFlags};
+use ordered_float::OrderedFloat;
 use crate::gamepad::using_controller;
 use crate::icons::texture_manager::TextureManager;
 use crate::rendering::popup_renderer::{add_popup, draw_popups};
@@ -64,7 +65,7 @@ impl RenderHook {
 impl RenderHook {
     fn try_resize_font(&mut self, ctx: &mut Context) {
         let [ww, wh] = get_window_size();
-        ctx.io_mut().font_global_scale = Settings::read_or_default().font_scale_multiplier * ww.min(wh) / DEFAULT_SCREEN_MIN;
+        ctx.io_mut().font_global_scale = ww.min(wh) / DEFAULT_SCREEN_MIN;
     }
 }
 
@@ -154,12 +155,14 @@ impl ImguiRenderLoop for RenderHook {
                         }
                         self.display_spells = DisplayItem::from_items(ui, &spells);
                     }
+                    self.display_spells.sort_by_key(|di| OrderedFloat(di.highlight_time));
                     if self.prev_quick_items != quick_items {
                         if is_debugging() {
                             tracing::info!("Remaking display quick items");
                         }
                         self.display_quick_items = DisplayItem::from_items(ui, &quick_items);
                     }
+                    self.display_quick_items.sort_by_key(|di| OrderedFloat(di.highlight_time));
 
                     if is_debugging() {
                         add_to_screen_debug(format!("Spells: {:?}", spells));

@@ -190,9 +190,9 @@ impl DisplayItem {
         };
         self.scale = 1.0 + scale_add;
         if let ItemNames::Center = settings.item_names() {
-            self.name.scale = 1.0;
+            self.name.scale = settings.font_scale_multiplier;
         } else {
-            self.name.scale = self.scale;
+            self.name.scale = self.scale * settings.font_scale_multiplier;
         }
 
         self.last_tick = tick;
@@ -221,7 +221,12 @@ impl DisplayItem {
                 let bg_alpha = 0xFE - s_bg_alpha;
 
                 for (bg, alpha) in [(static_icons.item_bg, bg_alpha), (static_icons.selected_item_bg, s_bg_alpha)] {
-                    let col = u32::from_be_bytes([alpha, primary_color[2], primary_color[1], primary_color[0]]);
+                    let col = u32::from_be_bytes([
+                        (alpha as f32 * settings.icon_background_tint[3]) as u8,
+                        (primary_color[2] as f32 * settings.icon_background_tint[2]) as u8,
+                        (primary_color[1] as f32 * settings.icon_background_tint[1]) as u8,
+                        (primary_color[0] as f32 * settings.icon_background_tint[0]) as u8,
+                    ]);
                     draw_list.add_image(
                         bg,
                         positions.img_c1,
@@ -245,7 +250,7 @@ impl DisplayItem {
                         .col(col)
                         .build();
 
-                    self.name.draw(ui, positions.text_pos, ui.style_color(imgui::StyleColor::Text), Centered::X, settings.text_shadows);
+                    self.name.draw(ui, positions.text_pos, settings.name_tint, Centered::X, settings.text_shadows);
                 }
             }
             Style::Simple => {
@@ -258,7 +263,7 @@ impl DisplayItem {
                 }
 
                 if let ItemNames::Show = settings.item_names() {
-                    self.name.draw(ui, positions.text_pos, ui.style_color(imgui::StyleColor::Text), Centered::X, settings.text_shadows);
+                    self.name.draw(ui, positions.text_pos, settings.name_tint, Centered::X, settings.text_shadows);
                 }
                 self.draw_controller_arc(settings, ww, wh, img_dim, num_items, draw_list, cx, cy, 0xFE_FF_FF_FF);
             }
@@ -288,7 +293,7 @@ impl DisplayItem {
             return;
         }
         if let ItemNames::Center = settings.item_names() {
-            self.name.draw(ui, [cx, cy], ui.style_color(imgui::StyleColor::Text), Centered::XY, settings.text_shadows);
+            self.name.draw(ui, [cx, cy], settings.name_tint, Centered::XY, settings.text_shadows);
         }
     }
 

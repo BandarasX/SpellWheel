@@ -80,6 +80,8 @@ settings!(
     item_names: String,
     text_shadows: bool,
     icon_tint: [f32; 4],
+    icon_background_tint: [f32; 4],
+    name_tint: [f32; 4],
     font_scale_multiplier: f32,
     icon_scale_multiplier: f32,
     radius_multiplier: f32,
@@ -134,6 +136,14 @@ pub const fn text_shadows() -> bool {
 }
 
 pub const fn icon_tint() -> [f32; 4] {
+    [1.0; 4]
+}
+
+pub const fn icon_background_tint() -> [f32; 4] {
+    [1.0; 4]
+}
+
+pub const fn name_tint() -> [f32; 4] {
     [1.0; 4]
 }
 
