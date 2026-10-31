@@ -1,3 +1,9 @@
+# Whether the spell wheel is enabled. Default is true.
+spell_wheel_enabled = true
+
+# Whether the item wheel is enabled. Default is true.
+item_wheel_enabled = true
+
 # The key used to open the spell wheel. This uses the Windows Virtual Key Codes, so the names may not be what you expect.
 # You can visit this website for the full list of VK codes:
 # https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes

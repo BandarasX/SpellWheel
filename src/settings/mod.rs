@@ -69,6 +69,8 @@ macro_rules! settings {
 }
 
 settings!(
+    spell_wheel_enabled: bool,
+    item_wheel_enabled: bool,
     spells_key: String,
     quick_items_key: String,
     style: String,
@@ -94,6 +96,14 @@ settings!(
     timing_offset: f32,
     force_rgba: bool,
 );
+
+pub fn spell_wheel_enabled() -> bool {
+    true
+}
+
+pub fn item_wheel_enabled() -> bool {
+    true
+}
 
 pub fn spells_key() -> String {
     "INGAME".to_string()

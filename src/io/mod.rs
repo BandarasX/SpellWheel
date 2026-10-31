@@ -1,6 +1,6 @@
 use crate::debugging::{add_to_screen_debug, is_debugging};
 use crate::gamepad::set_last_open_is_controller;
-use crate::io::bindings::{set_spell_bindings, Bindings, set_item_bindings};
+use crate::io::bindings::{set_spell_bindings, Bindings, set_item_bindings, PhysicalKeys};
 use crate::keyboard::KEYS;
 use crate::rendering::wheel_renderer::WheelType;
 use crate::settings::Settings;
@@ -14,6 +14,8 @@ use hudhook::windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_CAPIT
 use hudhook::windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 use lazy_static::lazy_static;
 use std::sync::{LockResult, Mutex, MutexGuard};
+use windows::Win32::UI::Input::KeyboardAndMouse::VK_0;
+use crate::keyboard::listener::{static_listener, Listener};
 
 pub mod bindings;
 pub mod hook;
@@ -44,6 +46,16 @@ pub fn io_selected_wheel_type(pad: Option<&CSInGamePad>) -> WheelType {
 
 		let switch_spell = bindings.get_input_bindings(pad, &UserInputKey::SwitchSpell);
 		let switch_item = bindings.get_input_bindings(pad, &UserInputKey::SwitchItem);
+		if static_listener("entries".to_string(), || Listener::Released { keys: Box::new([VK_0.0 as i32]) }).is_active() {
+			let switch_spell = bindings.get_input_bindings_dbg(pad, &UserInputKey::SwitchSpell);
+			let switch_item = bindings.get_input_bindings_dbg(pad, &UserInputKey::SwitchItem);
+			tracing::info!("Switch spell keys: {switch_spell:?}");
+			tracing::info!("Switch item keys: {switch_item:?}");
+			let switch_spell2 = bindings.get_input_bindings_dbg(pad, &UserInputKey::SwitchSpell2);
+			let switch_item2 = bindings.get_input_bindings_dbg(pad, &UserInputKey::SwitchItem2);
+			tracing::info!("Switch spell keys2: {switch_spell2:?}");
+			tracing::info!("Switch item keys2: {switch_item2:?}");
+		}
 		let spell_status = switch_spell.pressed_status(None);
 		let item_status = switch_item.pressed_status(None);
 		if is_debugging() {
@@ -55,37 +67,44 @@ pub fn io_selected_wheel_type(pad: Option<&CSInGamePad>) -> WheelType {
 		set_spell_bindings(switch_spell);
 		set_item_bindings(switch_item);
 
-		if (spell_status.key() || spell_status.mouse()) && settings.spells_key.to_lowercase() == "ingame" {
-			set_last_open_is_controller(false);
-			return WheelType::Spells;
-		}
-		if spell_status.pad() {
-			set_last_open_is_controller(true);
-			return WheelType::Spells;
+		if settings.spell_wheel_enabled {
+			if (spell_status.key() || spell_status.mouse()) && settings.spells_key.to_lowercase() == "ingame" {
+				set_last_open_is_controller(false);
+				return WheelType::Spells;
+			}
+			if spell_status.pad() {
+				set_last_open_is_controller(true);
+				return WheelType::Spells;
+			}
 		}
 
-		if (item_status.key() || item_status.mouse()) && settings.quick_items_key.to_lowercase() == "ingame" {
-			set_last_open_is_controller(false);
-			return WheelType::QuickItems;
-		}
-		if item_status.pad() {
-			set_last_open_is_controller(true);
-			return WheelType::QuickItems;
+		if settings.item_wheel_enabled {
+			if (item_status.key() || item_status.mouse()) && settings.quick_items_key.to_lowercase() == "ingame" {
+				set_last_open_is_controller(false);
+				return WheelType::QuickItems;
+			}
+			if item_status.pad() {
+				set_last_open_is_controller(true);
+				return WheelType::QuickItems;
+			}
 		}
 	}
 
 	let spells = (
-		WheelType::Spells,
+		WheelType::Spells, settings.spell_wheel_enabled,
 		PREV_KEY_SPELLS.lock(), settings.spells_key.clone(), VK_TAB,
 	);
 	let quick_items = (
-		WheelType::QuickItems,
+		WheelType::QuickItems, settings.item_wheel_enabled,
 		PREV_KEY_QUICK_ITEMS.lock(), settings.quick_items_key.clone(), VK_CAPITAL,
 	);
 	for (
-		wheel_type,
+		wheel_type, enabled,
 		prev_key, key, raw_key_default,
 	) in [spells, quick_items] {
+		if !enabled {
+			continue;
+		}
 		if let Some(value) = is_wheel_open_key_pressed(wheel_type, prev_key, key, &raw_key_default) {
 			set_last_open_is_controller(false);
 			return value;

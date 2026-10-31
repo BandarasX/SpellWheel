@@ -4,10 +4,13 @@ use crate::settings::Settings;
 use bitfield::bitfield;
 use eldenring::cs::{CSInGamePad, UserInputKey};
 use lazy_static::lazy_static;
+use ordered_float::OrderedFloat;
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, RwLock};
 use windows::Win32::UI::Input::KeyboardAndMouse::{MAPVK_VSC_TO_VK_EX, MapVirtualKeyW};
 use windows::Win32::UI::Input::XboxController::{XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_BACK, XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_DPAD_RIGHT, XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_LEFT_SHOULDER, XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_SHOULDER, XINPUT_GAMEPAD_RIGHT_THUMB, XINPUT_GAMEPAD_START, XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_Y};
+use crate::debugging::add_to_screen_debug;
+use crate::keyboard::hook::{get_scroll, scrolled};
 
 lazy_static!(
 	static ref SPELL_BINDINGS: Arc<RwLock<PhysicalKeys>> = Arc::new(RwLock::new(PhysicalKeys::none()));
@@ -46,6 +49,17 @@ impl Bindings {
 			self.entries.iter().filter(|entry| entry.for_virtual_index(idx)).collect()
 		}
 	}
+	pub fn get_input_bindings_dbg(&self, pad: &CSInGamePad, input: &UserInputKey) -> Vec<&BindingEntry> {
+		unsafe {
+			let Some(itg) = pad.input_type_group.as_ref().find(input) else {
+				return vec![];
+			};
+			let Some(idx) = pad.key_assign.as_ref().get_virtual_input_index(itg.mapped_input_list[0]) else {
+				return vec![];
+			};
+			self.entries.iter().filter(|entry| entry.for_virtual_index(idx)).collect()
+		}
+	}
 
 	pub fn from_pad(pad: &CSInGamePad) -> Self {
 		unsafe {
@@ -60,10 +74,10 @@ impl Bindings {
 			let binding_vectors = *begin as *const usize;
 
 			let mut digital_entries = BindingEntry::from_binding_vec(
-				*binding_vectors.add(7) as *const usize, *binding_vectors.add(8) as *const usize
+				*binding_vectors.add(7) as *const usize, *binding_vectors.add(8) as *const usize, false
 			);
 			let mut analog_entries = BindingEntry::from_binding_vec(
-				*binding_vectors.add(15) as *const usize, *binding_vectors.add(16) as *const usize
+				*binding_vectors.add(15) as *const usize, *binding_vectors.add(16) as *const usize, true
 			);
 			let mut entries = digital_entries;
 			entries.append(&mut analog_entries);
@@ -78,7 +92,7 @@ impl Bindings {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalKeys {
 	pub which_present: u8,
-	pub mouse: u8,
+	pub mouse: Result<u8, bool>,
 	pub pad: Result<GamepadButtons, bool>,
 	pub key: u32,
 	pub unknown: i32,
@@ -87,23 +101,24 @@ pub struct PhysicalKeys {
 bitfield! {
 	#[derive(Clone, Copy, PartialEq, Eq)]
 	pub struct PressedStatus(u8);
-	pub mouse, set_mouse: 0;
-	pub pad,   set_pad:   1;
-	pub key,   set_key:   2;
+	pub mouse,  set_mouse:  0;
+	pub pad,    set_pad:    1;
+	pub key,    set_key:    2;
+	pub scroll, set_scroll: 3;
 }
 
 impl PhysicalKeys {
 	pub fn none() -> Self {
 		Self {
 			which_present: 0,
-			mouse: 0,
+			mouse: Ok(0),
 			pad: Ok(GamepadButtons::default()),
 			key: 0,
 			unknown: 0,
 		}
 	}
 
-	pub fn mouse(&mut self, mouse: u8) {
+	pub fn mouse(&mut self, mouse: Result<u8, bool>) {
 		self.which_present |= 0b0001;
 		self.mouse = mouse;
 	}
@@ -125,10 +140,13 @@ impl PhysicalKeys {
 
 	pub fn pressed_status(&self, min_pad_press_length: Option<f32>) -> PressedStatus {
 		let mut ps = PressedStatus(0);
-		if self.which_present & 0b001 != 0 {
-			ps.set_mouse(keyboard::is_pressed(self.mouse as i32));
+		if self.which_present & 0b0001 != 0 {
+			match self.mouse {
+				Ok(mb) => ps.set_mouse(keyboard::is_pressed(mb as i32)),
+				Err(is_up) => ps.set_scroll(scrolled(is_up)),
+			}
 		}
-		if self.which_present & 0b010 != 0 {
+		if self.which_present & 0b0010 != 0 {
 			let controller_delay = Settings::read_or_default().controller_wheel_open_delay;
 			let [min, max] = if let Some(min_length) = min_pad_press_length {
 				[min_length, controller_delay]
@@ -142,7 +160,7 @@ impl PhysicalKeys {
 				ps.set_pad(min <= length && length <= max);
 			}
 		}
-		if self.which_present & 0b100 != 0 {
+		if self.which_present & 0b0100 != 0 {
 			ps.set_key(keyboard::is_pressed(self.key as i32));
 		}
 		ps
@@ -152,7 +170,7 @@ impl PhysicalKeys {
 impl Debug for PhysicalKeys {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		if self.which_present & 0b0001 != 0 {
-			write!(f, "mouse={} ", self.mouse)?;
+			write!(f, "mouse={:?} ", self.mouse)?;
 		}
 		if self.which_present & 0b0010 != 0 {
 			write!(f, "pad={:?} ", self.pad)?;
@@ -172,7 +190,8 @@ impl<'a> FromIterator<&'a BindingEntry> for PhysicalKeys {
 		let mut this = Self::none();
 		for entry in iter {
 			match entry.decode() {
-				PhysicalInput::Mouse(mouse) => this.mouse(mouse),
+				PhysicalInput::Mouse(mouse) => this.mouse(Ok(mouse)),
+				PhysicalInput::Scroll(is_up) => this.mouse(Err(is_up)),
 				PhysicalInput::PadTriggers(is_right) => this.pad(Err(is_right)),
 				PhysicalInput::Pad(pad) => this.pad(Ok(pad)),
 				PhysicalInput::Key(key) => this.key(key),
@@ -194,10 +213,14 @@ impl Debug for PressedStatus {
 		if self.key() {
 			write!(f, "k")?;
 		}
+		if self.scroll() {
+			write!(f, "k")?;
+		}
 		Ok(())
 	}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BindingEntry {
 	pub virtual_index: i32,
 	pub code: i32,
@@ -218,6 +241,7 @@ impl BindingEntry {
 	pub fn decode(&self) -> PhysicalInput {
 		match self.code {
 			0..=3 => PhysicalInput::Mouse(MOUSE_BUTTON_ORDER[self.code as usize]),
+			4..=5 => PhysicalInput::Scroll(self.code == 4),
 			11..=12 => PhysicalInput::PadTriggers(self.code == 12),
 			40..=53 => PhysicalInput::Pad(PAD_ORDER[(self.code - 40) as usize]),
 			70..=189 => PhysicalInput::Key(di_to_vk((self.code - 69) as u32)),
@@ -226,7 +250,7 @@ impl BindingEntry {
 		}
 	}
 
-	pub unsafe fn from_binding_vec(vec_begin: *const usize, vec_end: *const usize) -> Vec<Self> {
+	pub unsafe fn from_binding_vec(vec_begin: *const usize, vec_end: *const usize, is_analog: bool) -> Vec<Self> {
 		let mut out = Vec::new();
 		if vec_begin.is_null() || vec_end < vec_begin {
 			return out;
@@ -235,7 +259,34 @@ impl BindingEntry {
 		for i in 0..n {
 			let entry_ptr = *vec_begin.add(i) as *const i32;
 			if !entry_ptr.is_null() {
-				out.push(Self::new(*entry_ptr.add(2), *entry_ptr.add(3)));
+				// 0 -> not mouse wheel, 1 -> mouse wheel up, -1 -> mouse wheel down
+				let mouse_wheel = if is_analog {
+					let r_lo = *entry_ptr.add(4).cast::<f32>();
+					let r_hi = *entry_ptr.add(5).cast::<f32>();
+					let mut abs_range = [OrderedFloat(r_lo.abs()), OrderedFloat(r_hi.abs())];
+					abs_range.sort();
+
+					// Mouse wheel is always within 9.999 <-> 10000.001 (absolute)
+					let is_mouse_wheel =
+						(abs_range[0] - 9.999).abs() < 1e-3 &&
+						(abs_range[1] - 10000.001).abs() < 1e-3;
+
+					if !is_mouse_wheel {
+						0
+					} else if r_lo < 0.0 {
+						-1
+					} else {
+						1
+					}
+				} else {
+					0
+				};
+				match mouse_wheel {
+					0 => out.push(Self::new(*entry_ptr.add(2), *entry_ptr.add(3))),
+					1 => out.push(Self::new(*entry_ptr.add(2), 4)),
+					-1 => out.push(Self::new(*entry_ptr.add(2), 5)),
+					_ => unreachable!(),
+				}
 			}
 		}
 		out
@@ -245,6 +296,7 @@ impl BindingEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhysicalInput {
 	Mouse(u8),
+	Scroll(bool),
 	PadTriggers(bool),
 	Pad(GamepadButtons),
 	Key(u32),

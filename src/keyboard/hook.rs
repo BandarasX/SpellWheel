@@ -1,18 +1,56 @@
 use std::ffi::c_void;
 use std::mem;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicI16, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 use hudhook::windows::core::Interface;
 use hudhook::windows::Win32::Devices::HumanInterfaceDevice::{DirectInput8Create, GUID_SysKeyboard, IDirectInput8W, IDirectInputDevice8W};
 use lazy_static::lazy_static;
 use retour::GenericDetour;
 use windows::core::s;
 use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetModuleHandleW, GetProcAddress};
+use crate::debugging::add_to_screen_debug;
+use crate::get_tick;
 use crate::settings::display_settings::display_settings_open;
 
 lazy_static!(
     static ref INSTALLED: AtomicBool = AtomicBool::new(false);
+    static ref SCROLL_ACCUM: Arc<RwLock<Vec<Scroll>>> = Arc::new(RwLock::new(Vec::new()));
 );
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Scroll {
+    pub amount: i16,
+    pub tick: u64,
+}
+
+impl Scroll {
+    pub fn new(amount: i16) -> Self {
+        Self {
+            amount,
+            tick: get_tick(),
+        }
+    }
+}
+
+fn scroll(scroll: i16) {
+    SCROLL_ACCUM.write().expect("Couldn't acquire SCROLL_ACCUM").push(Scroll::new(scroll));
+}
+
+pub fn get_scroll() -> Vec<Scroll> {
+    SCROLL_ACCUM.read().expect("Couldn't acquire SCROLL_ACCUM").clone()
+}
+
+pub fn scrolled(up: bool) -> bool {
+    get_scroll().iter().any(|scroll| {
+        let scroll = scroll.amount;
+        (up && scroll > 0) || (!up && scroll < 0)
+    })
+}
+
+pub fn reset_scroll() {
+    let tick = get_tick();
+    SCROLL_ACCUM.write().expect("Couldn't acquire SCROLL_ACCUM").retain(|scroll| scroll.tick >= tick - 1);
+}
 
 type GetDeviceStateFn = unsafe extern "system" fn(*mut c_void, u32, *mut c_void) -> i32;
 static STATE_HOOK: OnceLock<GenericDetour<GetDeviceStateFn>> = OnceLock::new();
@@ -46,14 +84,28 @@ pub unsafe fn install_dinput_hook() -> anyhow::Result<()> {
 type GetRawInputDataFn = unsafe extern "system" fn(isize, u32, *mut c_void, *mut u32, u32) -> u32;
 static RAW_HOOK: OnceLock<GenericDetour<GetRawInputDataFn>> = OnceLock::new();
 
+const RIM_TYPEMOUSE: u32 = 0;
+const RI_MOUSE_WHEEL: u16 = 0x0400;
+
 unsafe extern "system" fn get_raw_input_data_detour(
     h: isize, cmd: u32, data: *mut c_void, size: *mut u32, hdr_size: u32,
 ) -> u32 {
     let r = RAW_HOOK.get().unwrap().call(h, cmd, data, size, hdr_size);
     const RID_INPUT: u32 = 0x1000_0003;
-    if r != u32::MAX && !data.is_null() && cmd == RID_INPUT && display_settings_open()
-        && *(data as *const u32) == 0 && r > hdr_size {
-        std::ptr::write_bytes((data as *mut u8).add(hdr_size as usize), 0, (r - hdr_size) as usize);
+    if r != u32::MAX && !data.is_null() && cmd == RID_INPUT
+        && *(data as *const u32) == RIM_TYPEMOUSE && r > hdr_size {
+        let mouse = (data as *mut u8).add(hdr_size as usize);
+        let flags_ptr = mouse.add(4) as *mut u16;   // usButtonFlags
+        let delta_ptr = mouse.add(6) as *mut i16;   // usButtonData
+
+        if *flags_ptr & RI_MOUSE_WHEEL != 0 {
+            let delta = std::ptr::read_unaligned(delta_ptr);
+            scroll(delta);
+        }
+
+        if display_settings_open() {
+            std::ptr::write_bytes((data as *mut u8).add(hdr_size as usize), 0, (r - hdr_size) as usize);
+        }
     }
     r
 }

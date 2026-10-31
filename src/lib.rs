@@ -39,14 +39,14 @@ use rendering::render_hook::ItemWheelData;
 use rendering::wheel_renderer::WheelType;
 use std::fs::File;
 use std::mem;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tracing_subscriber::fmt;
 #[cfg(feature = "extra-memory-slots-support")]
 use crate::expanded_memory_slots::SelectionResult;
 use crate::items::Item;
-use crate::keyboard::hook::install_keyboard_and_mouse_hooks;
+use crate::keyboard::hook::{install_keyboard_and_mouse_hooks, reset_scroll};
 use crate::settings::Settings;
 use crate::settings::display_settings::display_settings_open;
 use crate::xinput_hook::{install_xinput_hook, remove_xinput_hook, set_suppress_camera};
@@ -118,7 +118,12 @@ fn deinit() {
 
 lazy_static!(
     pub static ref PROGRAM_START: Instant = Instant::now();
+    static ref TICK: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 );
+
+pub fn get_tick() -> u64 {
+    TICK.load(Ordering::Relaxed)
+}
 
 #[macro_export]
 macro_rules! guard {
@@ -378,5 +383,7 @@ fn tick(_fd4: &FD4TaskData) {
         });
 
         commit_screen_debug();
+        reset_scroll();
+        TICK.fetch_add(1, Ordering::Relaxed);
     );
 }

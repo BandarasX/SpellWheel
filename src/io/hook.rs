@@ -95,6 +95,13 @@ unsafe extern "C" fn generic_hook<const I: usize>(a: usize, b: usize, c: usize, 
 	let mut ignore = true;
 	match supp_type {
 		SuppressionType::Item => {
+			if !settings.item_wheel_enabled {
+				ignore = false;
+			}
+			// Cycle if mouse button is scroll
+			if items_pressed.scroll() {
+				ignore = false;
+			}
 			// Cycle if pressed in-game key while control is not in-game
 			if (items_pressed.key() || items_pressed.mouse()) && !items_key_ingame {
 				ignore = false;
@@ -105,6 +112,13 @@ unsafe extern "C" fn generic_hook<const I: usize>(a: usize, b: usize, c: usize, 
 			}
 		}
 		SuppressionType::Spell => {
+			if !settings.spell_wheel_enabled {
+				ignore = false;
+			}
+			// Cycle if mouse button is scroll
+			if spells_pressed.scroll() {
+				ignore = false;
+			}
 			// Cycle if pressed in-game key while control is not in-game
 			if (spells_pressed.key() || spells_pressed.mouse()) && !spells_key_ingame {
 				ignore = false;
