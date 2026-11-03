@@ -2379,7 +2379,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "spellwheel"
-version = "1.6.3"
+version = "1.6.4"
 dependencies = [
  "anyhow",
  "bitfield 0.20.0",
@@ -2405,6 +2405,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "unicode-bidi",
  "windows 0.61.3",
  "windows-sys 0.61.2",
 ]
@@ -2728,6 +2729,12 @@ dependencies = [
  "smallvec",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
 name = "unicode-ident"

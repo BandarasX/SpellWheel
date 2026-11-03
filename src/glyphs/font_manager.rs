@@ -10,14 +10,21 @@ use crate::paths;
 use crate::settings::Settings;
 
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FontDirection {
+    Ltr,
+    Rtl,
+}
 pub const FONT_LATIN_BYTES: &[u8] = include_bytes!("../../assets/font_latin.ttf");
-pub const OTHER_FONTS: [(&str, &str); 6] = [
-    ("cyrillic.ttf", "rusru"),
-    ("japanese.ttf", "jpnjp"),
-    ("korean.ttf", "korkr"),
-    ("simplified_chinese.ttf", "zhocn"),
-    ("traditional_chinese.ttf", "zhotw"),
-    ("thai.ttf", "thath"),
+pub type FontEntry = (&'static str, &'static str, FontDirection);
+pub const OTHER_FONTS: [FontEntry; 7] = [
+    ("arabic.ttf", "araae", FontDirection::Rtl),
+    ("cyrillic.ttf", "rusru", FontDirection::Ltr),
+    ("japanese.ttf", "jpnjp", FontDirection::Ltr),
+    ("korean.ttf", "korkr", FontDirection::Ltr),
+    ("simplified_chinese.ttf", "zhocn", FontDirection::Ltr),
+    ("traditional_chinese.ttf", "zhotw", FontDirection::Ltr),
+    ("thai.ttf", "thath", FontDirection::Ltr),
 ];
 pub const DEFAULT_FONT_HEIGHT: f32 = 54.0;
 
@@ -26,15 +33,17 @@ lazy_static!(
 );
 
 pub struct FontData {
-    font_bytes: Vec<u8>,
-    msg_char_ranges: Vec<u32>,
+    pub font_bytes: Vec<u8>,
+    pub msg_char_ranges: Vec<u32>,
+    pub direction: FontDirection,
 }
 
 impl FontData {
-    pub fn new(font_bytes: Vec<u8>, msg_char_ranges: Vec<u32>) -> Self {
+    pub fn new(font_bytes: Vec<u8>, msg_char_ranges: Vec<u32>, direction: FontDirection) -> Self {
         Self {
             font_bytes,
             msg_char_ranges,
+            direction,
         }
     }
 }
@@ -55,7 +64,7 @@ impl FontManager {
     fn init_inner() -> Self {
         let mut chars = HashMap::new();
 
-        for (font_file, msg_folder) in OTHER_FONTS {
+        for (font_file, msg_folder, direction) in OTHER_FONTS.iter() {
             let Ok(font_bytes) = fs::read(paths::spellwheel().join(font_file)) else {
                 tracing::info!("Skipping {font_file}, not in spellwheel folder");
                 continue;
@@ -77,21 +86,26 @@ impl FontManager {
                 }
             }
 
-            let font_data = FontData::new(font_bytes, build_glyph_ranges(msg_chars.into_iter()));
+            let font_data = FontData::new(font_bytes, build_glyph_ranges(msg_chars.into_iter()), *direction);
 
             if is_debugging() {
                 tracing::info!("Glyph ranges for {font_file}:\n{:?}", font_data.msg_char_ranges);
             }
 
             chars.insert(
-                font_file,
+                *font_file,
                 font_data
             );
         }
 
         Self {
-            font_data: chars
+            font_data: chars,
         }
+    }
+
+    pub fn get_font_data() -> Option<&'static HashMap<&'static str, FontData>> {
+        FONT_MANAGER.get().and_then(|fm| fm.read().ok())
+            .map(|fd| unsafe { mem::transmute::<&_, &'static _>(&fd.font_data) })
     }
 
     pub fn generate_sources() -> Vec<FontSource<'static>> {
