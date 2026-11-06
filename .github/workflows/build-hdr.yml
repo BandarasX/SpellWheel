@@ -15,8 +15,8 @@ jobs:
         with:
           arch: x64
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Build release DLL
         run: cargo build --release --locked
