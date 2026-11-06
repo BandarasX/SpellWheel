@@ -89,6 +89,12 @@ impl ImguiRenderLoop for RenderHook {
     fn before_render<'a>(&'a mut self, ctx: &mut Context, render_context: &'a mut dyn RenderContext) {
         guard!(
             self.try_resize_font(ctx);
+            let hdr = Settings::read_or_default();
+            hudhook::set_dx12_hdr_settings(
+                hdr.hdr_enabled,
+                hdr.hdr_ui_brightness,
+                hdr.hdr_ui_saturation,
+            );
             if self.display_settings.reload_stage == 1 {
                 self.display_settings.reload_stage += 1;
             } else if self.display_settings.reload_stage == 2 {

@@ -141,6 +141,13 @@ pub mod inject;
 pub mod mh;
 pub(crate) mod renderer;
 
+/// Configure optional HDR conversion in the Direct3D 12 ImGui renderer.
+/// This has no effect when the DX12 feature is not enabled.
+#[cfg(feature = "dx12")]
+pub fn set_dx12_hdr_settings(enabled: bool, brightness_nits: f32, saturation: f32) {
+    renderer::backend::dx12::set_hdr_settings(enabled, brightness_nits, saturation);
+}
+
 pub use renderer::msg_filter::MessageFilter;
 
 pub mod util;

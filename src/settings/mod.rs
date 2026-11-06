@@ -95,6 +95,9 @@ settings!(
     debugging: bool,
     timing_offset: f32,
     force_rgba: bool,
+    hdr_enabled: bool,
+    hdr_ui_brightness: f32,
+    hdr_ui_saturation: f32,
 );
 
 pub fn spell_wheel_enabled() -> bool {
@@ -199,6 +202,18 @@ pub const fn timing_offset() -> f32 {
 
 pub const fn force_rgba() -> bool {
     false
+}
+
+pub const fn hdr_enabled() -> bool {
+    false
+}
+
+pub const fn hdr_ui_brightness() -> f32 {
+    200.0
+}
+
+pub const fn hdr_ui_saturation() -> f32 {
+    1.0
 }
 
 #[derive(Clone, Copy, Debug)]

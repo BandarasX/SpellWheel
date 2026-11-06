@@ -1,0 +1,30 @@
+name: Build Spell Wheel HDR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release DLL
+        run: cargo build --release --locked
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spellwheel-hdr-windows-x64
+          path: target/release/spellwheel.dll
+          if-no-files-found: error
+          retention-days: 7

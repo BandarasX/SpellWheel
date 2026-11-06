@@ -1,6 +1,7 @@
 // NOTE: see this for ManuallyDrop instances https://github.com/microsoft/windows-rs/issues/2386
 
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::mem::{offset_of, ManuallyDrop};
 use std::{mem, ptr, slice};
 
@@ -17,6 +18,30 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use crate::renderer::RenderEngine;
 use crate::util::{self, Fence};
 use crate::RenderContext;
+
+// HDR is opt-in. Float settings are stored as IEEE-754 bit patterns so the
+// render hook can update them without locking the DX12 render thread.
+static HDR_ENABLED: AtomicBool = AtomicBool::new(false);
+static HDR_UI_BRIGHTNESS_BITS: AtomicU32 = AtomicU32::new(0x4348_0000); // 200.0 nits
+static HDR_UI_SATURATION_BITS: AtomicU32 = AtomicU32::new(0x3f80_0000); // 1.0
+
+/// Update the optional HDR color-conversion settings used by the DX12 renderer.
+pub fn set_hdr_settings(enabled: bool, brightness_nits: f32, saturation: f32) {
+    let brightness = if brightness_nits.is_finite() {
+        brightness_nits.clamp(50.0, 2000.0)
+    } else {
+        200.0
+    };
+    let saturation = if saturation.is_finite() {
+        saturation.clamp(0.0, 2.0)
+    } else {
+        1.0
+    };
+
+    HDR_UI_BRIGHTNESS_BITS.store(brightness.to_bits(), Ordering::Relaxed);
+    HDR_UI_SATURATION_BITS.store(saturation.to_bits(), Ordering::Relaxed);
+    HDR_ENABLED.store(enabled, Ordering::Relaxed);
+}
 
 struct FrameContext {
     command_allocator: ID3D12CommandAllocator,
@@ -58,6 +83,7 @@ pub struct D3D12RenderEngine {
 
     root_signature: ID3D12RootSignature,
     pipeline_state: ID3D12PipelineState,
+    rtv_format: DXGI_FORMAT,
 
     projection_buffer: [[f32; 4]; 4],
 
@@ -92,7 +118,9 @@ impl D3D12RenderEngine {
         let (rtv_heap, texture_heap) = unsafe { create_heaps(&device) }?;
         let rtv_heap_start = unsafe { rtv_heap.GetCPUDescriptorHandleForHeapStart() };
 
-        let (root_signature, pipeline_state) = unsafe { create_shader_program(&device) }?;
+        let initial_rtv_format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        let (root_signature, pipeline_state) =
+            unsafe { create_shader_program(&device, initial_rtv_format) }?;
 
         let fence = Fence::new(&device)?;
 
@@ -109,6 +137,7 @@ impl D3D12RenderEngine {
             texture_heap,
             root_signature,
             pipeline_state,
+            rtv_format: initial_rtv_format,
             projection_buffer: Default::default(),
             fence,
             frame_contexts,
@@ -143,6 +172,21 @@ impl RenderEngine for D3D12RenderEngine {
 
     fn render(&mut self, draw_data: &DrawData, render_target: Self::RenderTarget) -> Result<()> {
         unsafe {
+            let actual_rtv_format = render_target.GetDesc().Format;
+            if actual_rtv_format != self.rtv_format {
+                // The PSO cannot be replaced while a queued frame still uses it.
+                for frame in &self.frame_contexts {
+                    if frame.fence_value != 0 {
+                        self.fence.wait_for_value(frame.fence_value)?;
+                    }
+                }
+                let (root_signature, pipeline_state) =
+                    create_shader_program(&self.device, actual_rtv_format)?;
+                self.root_signature = root_signature;
+                self.pipeline_state = pipeline_state;
+                self.rtv_format = actual_rtv_format;
+            }
+
             let fc = &self.frame_contexts[self.frame_index];
 
             if fc.fence_value != 0 {
@@ -336,6 +380,17 @@ impl D3D12RenderEngine {
             self.projection_buffer.as_ptr() as *const c_void,
             0,
         );
+        let hdr_constants = [
+            HDR_ENABLED.load(Ordering::Relaxed) as u32,
+            HDR_UI_BRIGHTNESS_BITS.load(Ordering::Relaxed),
+            HDR_UI_SATURATION_BITS.load(Ordering::Relaxed),
+        ];
+        self.command_list.SetGraphicsRoot32BitConstants(
+            2,
+            3,
+            hdr_constants.as_ptr() as *const c_void,
+            0,
+        );
         self.command_list.OMSetBlendFactor(Some(&[0f32; 4]));
     }
 }
@@ -364,6 +419,7 @@ unsafe fn create_heaps(device: &ID3D12Device) -> Result<(ID3D12DescriptorHeap, T
 
 unsafe fn create_shader_program(
     device: &ID3D12Device,
+    rtv_format: DXGI_FORMAT,
 ) -> Result<(ID3D12RootSignature, ID3D12PipelineState)> {
     let parameters = [
         D3D12_ROOT_PARAMETER {
@@ -393,10 +449,21 @@ unsafe fn create_shader_program(
             },
             ShaderVisibility: D3D12_SHADER_VISIBILITY_PIXEL,
         },
+        D3D12_ROOT_PARAMETER {
+            ParameterType: D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+            Anonymous: D3D12_ROOT_PARAMETER_0 {
+                Constants: D3D12_ROOT_CONSTANTS {
+                    ShaderRegister: 1,
+                    RegisterSpace: 0,
+                    Num32BitValues: 3,
+                },
+            },
+            ShaderVisibility: D3D12_SHADER_VISIBILITY_PIXEL,
+        },
     ];
 
     let root_signature_desc = D3D12_ROOT_SIGNATURE_DESC {
-        NumParameters: 2,
+        NumParameters: 3,
         pParameters: parameters.as_ptr(),
         NumStaticSamplers: 1,
         pStaticSamplers: &D3D12_STATIC_SAMPLER_DESC {
@@ -467,12 +534,55 @@ unsafe fn create_shader_program(
       float4 col: COLOR0;
       float2 uv: TEXCOORD0;
     };
-
     SamplerState sampler0: register(s0);
     Texture2D texture0: register(t0);
 
+    cbuffer HdrParams : register(b1) {
+      uint hdrEnabled;
+      float uiNits;
+      float uiSaturation;
+    };
+
+    float SrgbToLinear1(float c) {
+      return (c <= 0.04045f)
+          ? (c / 12.92f)
+          : pow(abs(c + 0.055f) / 1.055f, 2.4f);
+    }
+    float3 SrgbToLinear(float3 color) {
+      return float3(
+        SrgbToLinear1(color.r),
+        SrgbToLinear1(color.g),
+        SrgbToLinear1(color.b));
+    }
+    float3 Rec709ToRec2020(float3 color) {
+      return float3(
+        dot(color, float3(0.627402f, 0.329292f, 0.043306f)),
+        dot(color, float3(0.069095f, 0.919544f, 0.011360f)),
+        dot(color, float3(0.016394f, 0.088028f, 0.895578f)));
+    }
+    float3 LinearToST2084(float3 color) {
+      const float m1 = 2610.0f / 4096.0f / 4.0f;
+      const float m2 = 2523.0f / 4096.0f * 128.0f;
+      const float c1 = 3424.0f / 4096.0f;
+      const float c2 = 2413.0f / 4096.0f * 32.0f;
+      const float c3 = 2392.0f / 4096.0f * 32.0f;
+      float3 cp = pow(abs(color), m1);
+      return pow((c1 + c2 * cp) / (1.0f + c3 * cp), m2);
+    }
+    float3 ApplySaturation(float3 color) {
+      float luma = dot(color, float3(0.2627f, 0.6780f, 0.0593f));
+      return max(0.0f, luma + (color - luma) * uiSaturation);
+    }
+
     float4 main(PS_INPUT input): SV_Target {
       float4 out_col = input.col * texture0.Sample(sampler0, input.uv);
+      if (hdrEnabled == 0) {
+        return out_col;
+      }
+      float3 linear_color = SrgbToLinear(saturate(out_col.rgb));
+      float3 rec2020 = Rec709ToRec2020(linear_color);
+      rec2020 = ApplySaturation(rec2020);
+      out_col.rgb = LinearToST2084(rec2020 * (uiNits / 10000.0f));
       return out_col;
     }"#;
 
@@ -551,7 +661,7 @@ unsafe fn create_shader_program(
         SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
         Flags: D3D12_PIPELINE_STATE_FLAG_NONE,
         RTVFormats: [
-            DXGI_FORMAT_B8G8R8A8_UNORM,
+            rtv_format,
             Default::default(),
             Default::default(),
             Default::default(),
