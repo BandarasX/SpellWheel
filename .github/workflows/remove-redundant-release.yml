@@ -1,0 +1,33 @@
+name: Remove redundant initial settings-fix release
+
+on:
+  push:
+    branches: [master]
+    paths: ['.github/workflows/remove-redundant-release.yml']
+
+jobs:
+  cleanup:
+    if: github.event.head_commit.message == 'Remove redundant initial settings-fix release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete only the superseded release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = 'BandarasX/SpellWheel'
+          $keep = gh api "repos/$repo/releases/tags/settings-shortcut-fix-fccaa3b" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $keep.id -ne 446032981 -or $keep.target_commitish -ne 'fccaa3b18b76f529a3831e4f4bb6f7fe4c4130f0') { throw 'Retained release identity check failed' }
+          $old = gh api "repos/$repo/releases/tags/settings-shortcut-fix-6b29532" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $old.id -ne 446029928 -or $old.target_commitish -ne '6b295323d1c329fbe8407a991398fd1b83cdb105') { throw 'Superseded release identity check failed' }
+          gh api --method DELETE "repos/$repo/releases/446029928"
+          if ($LASTEXITCODE -ne 0) { throw 'Release deletion failed' }
+          $releases = gh api "repos/$repo/releases?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify releases' }
+          if ($releases.tag_name -contains 'settings-shortcut-fix-6b29532') { throw 'Old release is still present' }
+          if ($releases.tag_name -notcontains 'settings-shortcut-fix-fccaa3b') { throw 'Retained release is missing' }
+          Write-Host 'Verified: redundant release deleted; latest release retained. Tags and source commits were not deleted.'
+
