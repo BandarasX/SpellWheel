@@ -1,0 +1,17 @@
+[package]
+name = "spellwheel-listener-harness"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("settings-diagnostics"))'] }
+
+[dependencies]
+lazy_static = "=1.5.0"
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }

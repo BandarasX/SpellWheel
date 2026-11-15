@@ -138,6 +138,22 @@ macro_rules! guard {
 }
 
 fn start() {
+    #[cfg(feature = "settings-diagnostics")]
+    {
+        let marker = paths::dll_folder().join("spellwheel-settings-diagnostics.enable");
+        if marker.is_file() {
+            let log = paths::spellwheel().join(format!("settings-diagnostics-{}-{:x}.log", std::process::id(), hmodule()));
+            match hudhook::settings_diagnostics::enable(&log) {
+                Ok(()) => {
+                    hudhook::settings_diagnostics::event(format_args!(
+                        "module_start base={:x} dll={:?} build={} settings={:?}", hmodule(), paths::dll(),
+                        option_env!("SPELLWHEEL_DIAGNOSTIC_REVISION").unwrap_or("unrecorded"), paths::settings()));
+                    tracing::info!("Settings diagnostics enabled: {log:?}");
+                }
+                Err(err) => tracing::error!("Could not enable settings diagnostics: {err}"),
+            }
+        }
+    }
     tracing::info!("DLL Path: {:?}", paths::dll());
     tracing::info!("Game Path: {:?}", paths::game());
     tracing::info!("Awaiting system init");

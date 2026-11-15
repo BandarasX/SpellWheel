@@ -1,5 +1,4 @@
-use crate::keyboard::listener::setup_listener;
-use crate::keyboard::listener::{Listener, ListenerStatus};
+use crate::keyboard::settings_shortcut::SettingsShortcut;
 use crate::settings::SettingsContext;
 use crate::settings::visual_toml_parser::{SettingsError, Span, check_errors, parse_toml};
 use imgui::{ColorStackToken, DrawListMut, InputTextCallbackHandler, InputTextMultilineCallback, StyleColor, StyleStackToken, StyleVar, TextCallbackData, Ui};
@@ -8,7 +7,6 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_F10, VK_LSHIFT};
 use crate::rendering::popup_renderer::add_popup;
 
 lazy_static!(
@@ -64,7 +62,7 @@ pub struct DisplaySettings {
     pub error: Option<SettingsError>,
     pub toml_parse: Vec<Vec<Span>>,
     pub reload_stage: u8,
-    pub listener: ListenerStatus,
+    pub shortcut: SettingsShortcut,
     pub shown: bool,
 }
 
@@ -74,25 +72,32 @@ impl DisplaySettings {
         let error = None;
         let toml_parse = parse_toml(&text);
         let reload_stage = 0;
-        let listener = setup_listener(
-            Listener::Released {
-                keys: Box::new([VK_LSHIFT.0 as i32, VK_F10.0 as i32]),
-            }
-        );
+        let shortcut = SettingsShortcut::new();
         let shown = false;
+        #[cfg(feature = "settings-diagnostics")]
+        hudhook::settings_diagnostics::event(format_args!("editor_new listener={:x} shown=false generation={}", shortcut.diagnostic_id(), shortcut.generation()));
         Self {
             text,
             error,
             toml_parse,
             reload_stage,
-            listener,
+            shortcut,
             shown,
         }
     }
 
     pub fn update(&mut self) {
-        if self.listener.is_active() {
-            self.shown = !self.shown;
+        #[cfg(feature = "settings-diagnostics")]
+        let revision_before = crate::keyboard::listener::diagnostic_revision();
+        #[cfg(feature = "settings-diagnostics")]
+        let before = self.shown;
+        let activations = self.shortcut.update_visibility(&mut self.shown);
+        #[cfg(feature = "settings-diagnostics")]
+        let revision_after = crate::keyboard::listener::diagnostic_revision();
+        if activations != 0 {
+            #[cfg(feature = "settings-diagnostics")]
+            hudhook::settings_diagnostics::event(format_args!("editor_toggle reason=shortcut_generation listener={:x} game_tick={} revision_before={} revision_after={} before={} after={} activations={} generation={}",
+                self.shortcut.diagnostic_id(), crate::get_tick(), revision_before, revision_after, before, self.shown, activations, self.shortcut.generation()));
         }
         IS_OPEN.store(self.shown, Ordering::Relaxed);
         if !self.shown {
@@ -148,6 +153,11 @@ impl DisplaySettings {
         callback
     }
     pub fn draw(&mut self, ui: &Ui, draw_list: &DrawListMut) {
+        #[cfg(feature = "settings-diagnostics")]
+        if hudhook::settings_diagnostics::sampled() {
+            hudhook::settings_diagnostics::event(format_args!("editor_draw listener={:x} shown={} display={:?} window_pos={:?} window_size={:?}",
+                self.shortcut.diagnostic_id(), self.shown, ui.io().display_size, ui.window_pos(), ui.window_size()));
+        }
         if !self.shown {
             return;
         }

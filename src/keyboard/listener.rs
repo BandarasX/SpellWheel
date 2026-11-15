@@ -41,9 +41,18 @@ lazy_static!(
 	static ref LISTENERS: Arc<Mutex<Vec<(Option<String>, (Listener, ListenerStatus))>>> = Arc::new(Mutex::new(Vec::new()));
 );
 
+// Odd while polling, even once all statuses have been published. Diagnostic only.
+#[cfg(feature = "settings-diagnostics")]
+static POLL_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(feature = "settings-diagnostics")]
+pub fn diagnostic_revision() -> u64 { POLL_REVISION.load(Ordering::SeqCst) }
+
 pub fn tick_listeners() {
 	let mut prev_tick = PREV_TICK.lock().expect("Couldn't acquire PREV_TICK");
 	let listeners = LISTENERS.lock().expect("Couldn't acquire LISTENERS");
+	#[cfg(feature = "settings-diagnostics")]
+	POLL_REVISION.fetch_add(1, Ordering::SeqCst);
 
 	let mut next_tick = HashSet::new();
 	for (_, (listener, status)) in listeners.iter() {
@@ -62,12 +71,13 @@ pub fn tick_listeners() {
 		if is_debugging() {
 			add_to_screen_debug(format!("Listener status: {all_keys_previously_pressed}, {all_keys_currently_pressed}"));
 		}
-		if matches!(
+		let active = matches!(
 			(listener, all_keys_previously_pressed, all_keys_currently_pressed),
 			(Listener::Pressed{..}, false, true) |
 			(Listener::Released{..}, true, false) |
 			(Listener::Held{..}, _, true)
-		) {
+		);
+		if active {
 			tracing::info!("Listener activated");
 			status.0.store(true, Ordering::Relaxed);
 		} else {
@@ -76,6 +86,20 @@ pub fn tick_listeners() {
 	}
 
 	*prev_tick = next_tick;
+	// Use one focus snapshot for the settings chord, independently of other listeners.
+	let focused = crate::io::is_game_focused();
+	let shift = focused && keyboard::is_key_pressed(keyboard::settings_shortcut::SHIFT_KEY);
+	let f10 = focused && keyboard::is_key_pressed(keyboard::settings_shortcut::F10_KEY);
+	keyboard::settings_shortcut::poll(focused, shift, f10);
+	#[cfg(feature = "settings-diagnostics")]
+	{
+		POLL_REVISION.fetch_add(1, Ordering::SeqCst);
+		drop(listeners);
+		drop(prev_tick);
+		if let Err(err) = hudhook::settings_diagnostics::flush() {
+			tracing::error!("Settings diagnostic flush failed: {err}");
+		}
+	}
 }
 
 pub fn setup_listener(listener: Listener) -> ListenerStatus {

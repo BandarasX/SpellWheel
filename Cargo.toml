@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 default = []
 extra-memory-slots-support = []
 atlas-dump = []
+settings-diagnostics = ["hudhook/settings-diagnostics"]
 
 [dependencies]
 eldenring = { git = "https://github.com/vswarte/fromsoftware-rs" }

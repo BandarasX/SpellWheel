@@ -230,6 +230,13 @@ unsafe extern "system" fn dxgi_swap_chain_present_impl(
     sync_interval: u32,
     flags: u32,
 ) -> HRESULT {
+    #[cfg(feature = "settings-diagnostics")]
+    let _diagnostic_scope = crate::settings_diagnostics::begin_present();
+    #[cfg(feature = "settings-diagnostics")]
+    if crate::settings_diagnostics::sampled() {
+        crate::settings_diagnostics::event(format_args!("present_begin swap={:p} buffer={} sync={} flags={} desc={:?}",
+            swap_chain.as_raw(), swap_chain.GetCurrentBackBufferIndex(), sync_interval, flags, swap_chain.GetDesc()));
+    }
     let _hook_ejection_guard = HOOK_EJECTION_BARRIER.acquire_ejection_guard();
     {
         INIT_STATE.lock().insert_swap_chain(&swap_chain);
@@ -238,7 +245,12 @@ unsafe extern "system" fn dxgi_swap_chain_present_impl(
     let Trampolines { dxgi_swap_chain_present, .. } =
         TRAMPOLINES.get().expect("DirectX 12 trampolines uninitialized");
 
-    if let Err(e) = render(&swap_chain) {
+    let render_result = render(&swap_chain);
+    #[cfg(feature = "settings-diagnostics")]
+    if crate::settings_diagnostics::sampled() {
+        crate::settings_diagnostics::event(format_args!("overlay_render_result result={render_result:?}"));
+    }
+    if let Err(e) = render_result {
         util::print_dxgi_debug_messages();
         if INIT_STATE.is_done() {
             debug!("Render error: {e:?}");
@@ -249,6 +261,10 @@ unsafe extern "system" fn dxgi_swap_chain_present_impl(
 
     trace!("Call IDXGISwapChain::Present trampoline");
     let result = dxgi_swap_chain_present(swap_chain, sync_interval, flags);
+    #[cfg(feature = "settings-diagnostics")]
+    if crate::settings_diagnostics::sampled() {
+        crate::settings_diagnostics::event(format_args!("present_end result={result:?}"));
+    }
 
     if EJECT_REQUESTED.load(Ordering::SeqCst) {
         perform_eject();
@@ -270,7 +286,13 @@ unsafe extern "system" fn dxgi_swap_chain_resize_buffers_impl(
         TRAMPOLINES.get().expect("DirectX 12 trampolines uninitialized");
 
     trace!("Call IDXGISwapChain::ResizeBuffers trampoline");
-    dxgi_swap_chain_resize_buffers(p_this, buffer_count, width, height, new_format, flags)
+    #[cfg(feature = "settings-diagnostics")]
+    crate::settings_diagnostics::event(format_args!("resize_begin swap={:p} buffers={} size={}x{} format={:?} flags={}",
+        p_this.as_raw(), buffer_count, width, height, new_format, flags));
+    let result = dxgi_swap_chain_resize_buffers(p_this, buffer_count, width, height, new_format, flags);
+    #[cfg(feature = "settings-diagnostics")]
+    crate::settings_diagnostics::event(format_args!("resize_end result={result:?}"));
+    result
 }
 
 unsafe extern "system" fn d3d12_command_queue_execute_command_lists_impl(

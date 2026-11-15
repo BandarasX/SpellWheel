@@ -148,6 +148,10 @@ impl<T: RenderEngine> Pipeline<T> {
         let [fsw, fsh] = self.ctx.io().display_framebuffer_scale;
 
         if (w * fsw) <= 0.0 || (h * fsh) <= 0.0 {
+            #[cfg(feature = "settings-diagnostics")]
+            if crate::settings_diagnostics::sampled() {
+                crate::settings_diagnostics::event(format_args!("pipeline_skip size={}x{} scale={}x{}", w, h, fsw, fsh));
+            }
             warn!(
                 "Insufficient display size: {w}x{h}, framebuffer_scale: {fsw}x{fsh}; skipping \
                  frame"
@@ -158,6 +162,13 @@ impl<T: RenderEngine> Pipeline<T> {
         let ui = self.ctx.frame();
         self.render_loop.render(ui);
         let draw_data = self.ctx.render();
+
+        #[cfg(feature = "settings-diagnostics")]
+        if crate::settings_diagnostics::sampled() {
+            crate::settings_diagnostics::event(format_args!("draw_data vertices={} indices={} lists={} display={:?} scale={:?}",
+                draw_data.total_vtx_count, draw_data.total_idx_count, draw_data.draw_lists_count(),
+                draw_data.display_size, draw_data.framebuffer_scale));
+        }
 
         self.engine.render(draw_data, render_target)?;
 

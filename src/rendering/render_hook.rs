@@ -115,6 +115,11 @@ impl ImguiRenderLoop for RenderHook {
     }
 
     fn render(&mut self, ui: &mut Ui) {
+        #[cfg(feature = "settings-diagnostics")]
+        if hudhook::settings_diagnostics::sampled() {
+            hudhook::settings_diagnostics::event(format_args!("render_loop_begin listener={:x} shown={} display={:?}",
+                self.display_settings.shortcut.diagnostic_id(), self.display_settings.shown, ui.io().display_size));
+        }
         guard!(
             let font = ui.push_font(self.font.into());
             let (wheel_type, quick_items, spells) = ItemWheelData::get(|data|
@@ -216,6 +221,11 @@ impl ImguiRenderLoop for RenderHook {
 
             self.prev_type = wheel_type;
             font.pop();
+            #[cfg(feature = "settings-diagnostics")]
+            if hudhook::settings_diagnostics::sampled() {
+                hudhook::settings_diagnostics::event(format_args!("render_loop_end listener={:x} shown={}",
+                    self.display_settings.shortcut.diagnostic_id(), self.display_settings.shown));
+            }
         );
     }
 }

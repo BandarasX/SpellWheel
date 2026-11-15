@@ -1,4 +1,5 @@
 /target
+tests/listener-harness/target/
 build/spellwheel.dll
 build/spellwheel-ems.dll
 build/build_and_zip.ps1

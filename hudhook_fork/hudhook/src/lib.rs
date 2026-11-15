@@ -114,6 +114,10 @@
 #![allow(static_mut_refs)]
 #![deny(missing_docs)]
 
+/// Bounded, explicitly enabled settings investigation trace.
+#[cfg(feature = "settings-diagnostics")]
+pub mod settings_diagnostics;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 

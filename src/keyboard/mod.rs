@@ -5,6 +5,7 @@ use std::collections::HashMap;
 // use crate::keyboard::hook::unhooked_get_async_key_state;
 
 pub mod listener;
+pub mod settings_shortcut;
 pub mod hook;
 
 lazy_static!(

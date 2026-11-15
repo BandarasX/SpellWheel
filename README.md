@@ -4,6 +4,12 @@ switch spells without having to cycle through them one by one.
 
 Nexus page: https://www.nexusmods.com/eldenring/mods/9636
 
+<h2>HDR fork downloads and settings editor fix</h2>
+
+Download the Windows x64 DLL from the <a href="https://github.com/BandarasX/SpellWheel/releases/latest">latest GitHub Release</a>. Close the game before replacing the active DLL, preserve your existing <code>spellwheel.toml</code>, and keep backup DLLs outside mod-loading folders. Releases include source/build provenance and SHA-256 checksums.
+
+The settings shortcut fix prevents one Left Shift + F10 release from toggling the editor twice when rendering is nested. The user-tested candidate stayed open and closed normally, with original controller spell/item cycling working. See the <a href="docs/spellwheel-settings-fix-chatgpt-handoff.md">complete investigation and handoff</a> for evidence and limitations.
+
 <h2>Modded Spell Icons</h2>
 <p>
 In order to show icons of modded spells,
