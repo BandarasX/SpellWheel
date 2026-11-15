@@ -8,7 +8,25 @@ The settings editor's disappearing behavior was diagnosed with a reproducing gam
 
 The user confirmed: **“The editor stayed open for the duration and closed normally. Controller spell/item cycling worked normally.”** The successful trace shows 29.880140 seconds between open and explicit close.
 
-Repository: https://github.com/BandarasX/SpellWheel. Original upstream: https://github.com/notahackusator/SpellWheel. The publication commit, Windows workflow run, release links and downloadable DLL hash will be recorded here after the publication workflow completes. The user's latest request explicitly authorizes updating the GitHub repository and making the fixed DLL downloadable; earlier investigation-only restrictions against publication no longer apply to this step.
+**Publication completed.** Repository: https://github.com/BandarasX/SpellWheel, default branch `master`. Original upstream https://github.com/notahackusator/SpellWheel was not modified. The user's latest request explicitly authorized updating the GitHub repository and making the fixed DLL downloadable; earlier investigation-only restrictions against publication no longer applied to this step.
+
+| Published item | Verified value |
+| --- | --- |
+| Fix/source commit | [`6b295323d1c329fbe8407a991398fd1b83cdb105`](https://github.com/BandarasX/SpellWheel/commit/6b295323d1c329fbe8407a991398fd1b83cdb105) |
+| Release-source commit | [`fccaa3b18b76f529a3831e4f4bb6f7fe4c4130f0`](https://github.com/BandarasX/SpellWheel/commit/fccaa3b18b76f529a3831e4f4bb6f7fe4c4130f0); packaging-metadata follow-up only, no gameplay-code change from the fix commit |
+| Successful native workflow | [Run 43711761879](https://github.com/BandarasX/SpellWheel/actions/runs/43711761879), job 132804636920; both test suites, build, packaging, artifact upload and release publication succeeded |
+| Release | [`settings-shortcut-fix-fccaa3b`](https://github.com/BandarasX/SpellWheel/releases/tag/settings-shortcut-fix-fccaa3b), GitHub release ID 446032981; published, neither draft nor prerelease; verified as latest |
+| Direct DLL | [spellwheel.dll](https://github.com/BandarasX/SpellWheel/releases/download/settings-shortcut-fix-fccaa3b/spellwheel.dll), 7,440,384 bytes |
+| DLL SHA-256 | `fe16ab221b2d2e27a47aa07bd3d21bc987f82aa1f0b5622ad52e4c9aac5a634f` |
+| ZIP | [DLL, install instructions and provenance](https://github.com/BandarasX/SpellWheel/releases/download/settings-shortcut-fix-fccaa3b/spellwheel-settings-shortcut-fix-windows-x64.zip), 3,191,279 bytes |
+| ZIP SHA-256 | `20324d58fc93e7d6cf63397042f97ee4524e329e9e70328e7aa85062c35cb796` |
+| Build manifest | [build-provenance.json](https://github.com/BandarasX/SpellWheel/releases/download/settings-shortcut-fix-fccaa3b/build-provenance.json) |
+| Checksums | [SHA256SUMS.txt](https://github.com/BandarasX/SpellWheel/releases/download/settings-shortcut-fix-fccaa3b/SHA256SUMS.txt) |
+| Final handoff in repository | [This report](https://github.com/BandarasX/SpellWheel/blob/master/docs/spellwheel-settings-fix-chatgpt-handoff.md); a documentation-only follow-up records the completed publication without rebuilding the DLL |
+
+All four assets were downloaded from their public release URLs and checked against GitHub's asset digests. DLL and ZIP hashes also match SHA256SUMS and the build manifest. ZIP integrity passed; its DLL exactly matches the direct download and it contains no TOML. PE inspection confirms AMD64 / executable DLL. The normal DLL lacks the diagnostic transport and enable-marker strings.
+
+The native workflow reran the 13 listener/shortcut tests and three transport tests on Windows before building. Its manifest records default features (`[]`), pinned nightly-2026-11-13, rustc 1.102.0-nightly, the exact source commit and workflow run. The first source publication also completed successfully in [run 43711572827](https://github.com/BandarasX/SpellWheel/actions/runs/43711572827) and created `settings-shortcut-fix-6b29532`; use the later `fccaa3b` release linked above. No PR merge or upstream update was involved: the fork's master was fast-forwarded through checked expected SHAs.
 
 The repository update contains the tested settings-shortcut implementation, opt-in diagnostics, regression tests, investigation records and a Windows build/release workflow. No graphical settings panel, external-mod patch, controller redesign, or fix for live-FG-switch crashes is included.
 
@@ -113,7 +131,7 @@ The diagnostic trace records only shortcut bits/focus, module/instance identity,
 
 For installation, close the game, replace only the active `spellwheel.dll`, keep backups outside every mod-loading directory, and preserve the existing TOML. The default release includes the fix without diagnostic logging. Do not replace the user's settings file with defaults. Do not change FG live as part of installing or testing this fix.
 
-The newly published native Windows DLL is rebuilt from the committed fix with diagnostics disabled. It will have a different hash from the previously user-tested diagnostic cross-build. The successful candidate test validates the fix's source/behavior in that setup; it does not constitute a separate game test of the newly packaged native DLL.
+The published native Windows DLL was rebuilt from the committed fix with diagnostics disabled. It has a different hash from the previously user-tested diagnostic cross-build. The successful candidate test validates the fix's source/behavior in that setup; it does not constitute a separate game test of the newly packaged native DLL.
 
 ## Repository publication process
 
