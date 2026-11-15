@@ -4,7 +4,8 @@ New-Item -ItemType Directory -Force $package | Out-Null
 $dll = 'target/release/spellwheel.dll'
 $dllHash = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant()
 $diagnostics = $env:SETTINGS_DIAGNOSTICS -eq 'true'
-$features = if ($diagnostics) { @('settings-diagnostics') } else { @() }
+$features = @()
+if ($diagnostics) { $features = @('settings-diagnostics') }
 $build = [ordered]@{
     repository = $env:GITHUB_REPOSITORY
     commit = $env:GITHUB_SHA
