@@ -15,3 +15,9 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("settings-
 [dependencies]
 lazy_static = "=1.5.0"
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
+
+serde = { version = "=1.0.229", features = ["derive"] }
+toml = "=0.9.12"
+toml_edit = "=0.25.15"
+[dev-dependencies]
+imgui = "=0.12.0"

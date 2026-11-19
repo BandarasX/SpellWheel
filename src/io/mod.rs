@@ -32,6 +32,7 @@ pub fn selected_wheel_type() -> WheelType {
 }
 
 pub fn io_selected_wheel_type(pad: Option<&CSInGamePad>) -> WheelType {
+	if crate::settings::display_settings::display_settings_open() { return WheelType::None; }
 	if in_menus() {
 		if is_debugging() {
 			add_to_screen_debug("Player in menus".to_string());

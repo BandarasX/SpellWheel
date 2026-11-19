@@ -88,9 +88,7 @@ pub fn tick_listeners() {
 	*prev_tick = next_tick;
 	// Use one focus snapshot for the settings chord, independently of other listeners.
 	let focused = crate::io::is_game_focused();
-	let shift = focused && keyboard::is_key_pressed(keyboard::settings_shortcut::SHIFT_KEY);
-	let f10 = focused && keyboard::is_key_pressed(keyboard::settings_shortcut::F10_KEY);
-	keyboard::settings_shortcut::poll(focused, shift, f10);
+	keyboard::settings_shortcut::sample(focused);
 	#[cfg(feature = "settings-diagnostics")]
 	{
 		POLL_REVISION.fetch_add(1, Ordering::SeqCst);

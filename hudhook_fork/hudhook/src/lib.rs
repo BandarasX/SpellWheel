@@ -145,6 +145,15 @@ pub mod inject;
 pub mod mh;
 pub(crate) mod renderer;
 
+// Optional synchronous, allocation-free input ownership predicate. It runs on the window
+// thread after queuing messages for ImGui; callers must not touch the rendering context.
+static INPUT_MESSAGE_FILTER: std::sync::OnceLock<fn(u32, usize, isize) -> bool> = std::sync::OnceLock::new();
+/// Install a synchronous input-ownership predicate, called after messages are queued for ImGui.
+/// The predicate runs on the window thread and must not access the rendering context.
+pub fn set_input_message_filter(filter: fn(u32, usize, isize) -> bool) {
+    let _ = INPUT_MESSAGE_FILTER.set(filter);
+}
+
 /// Configure optional HDR conversion in the Direct3D 12 ImGui renderer.
 /// This has no effect when the DX12 feature is not enabled.
 #[cfg(feature = "dx12")]

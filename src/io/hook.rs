@@ -73,6 +73,7 @@ const TARGETS: [Target; NUM_HOOKS] = [
 static HOOKS: [OnceLock<GenericDetour<GenericHookFn>>; NUM_HOOKS] = [const { OnceLock::new() }; NUM_HOOKS];
 
 unsafe extern "C" fn generic_hook<const I: usize>(a: usize, b: usize, c: usize, d: usize) -> usize {
+	if crate::settings::display_settings::display_settings_open() { return 0; }
 	let settings = Settings::read_or_default();
 	let items_key_ingame = settings.quick_items_key.to_lowercase() == "ingame";
 	let spells_key_ingame = settings.spells_key.to_lowercase() == "ingame";

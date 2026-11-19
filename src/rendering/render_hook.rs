@@ -16,14 +16,19 @@ use ordered_float::OrderedFloat;
 use crate::gamepad::using_controller;
 use crate::icons::texture_manager::TextureManager;
 use crate::rendering::popup_renderer::{add_popup, draw_popups};
-use crate::settings::display_settings::DisplaySettings;
+use crate::settings::display_settings::{DisplaySettings, PANEL_FONT_SIZE, panel_font_source};
 
 pub struct RenderHook {
     font: FontId,
+    panel_font: FontId,
     display_spells: Vec<DisplayItem>,
     display_quick_items: Vec<DisplayItem>,
     display_settings: DisplaySettings,
     prev_type: WheelType,
+    preview_type: WheelType,
+    prev_controller_style: bool,
+    preview_controller_style: bool,
+    prev_layout: Option<(f32, f32, [f32; 2])>,
     prev_spells: Vec<Item>,
     prev_quick_items: Vec<Item>,
 }
@@ -32,10 +37,15 @@ impl RenderHook {
     pub fn new() -> Self {
         Self {
             font: FontId::none(),
+            panel_font: FontId::none(),
             display_spells: vec![],
             display_quick_items: vec![],
             display_settings: DisplaySettings::new(),
             prev_type: WheelType::None,
+            preview_type: WheelType::None,
+            prev_controller_style: false,
+            preview_controller_style: true,
+            prev_layout: None,
             prev_spells: vec![],
             prev_quick_items: vec![],
         }
@@ -80,7 +90,19 @@ impl ImguiRenderLoop for RenderHook {
 
             tracing::info!("Loading font...");
 
-            self.font = ctx.fonts().add_font(FontManager::generate_sources().as_ref()).into();
+            hudhook::set_input_message_filter(crate::settings::display_settings::input_message_filter);
+            ctx.io_mut().config_flags.insert(imgui::ConfigFlags::NAV_ENABLE_KEYBOARD);
+            ctx.io_mut().config_windows_move_from_title_bar_only = true;
+            let mut sources = FontManager::generate_sources();
+            self.font = ctx.fonts().add_font(&sources).into();
+            // Keep the configured non-Latin glyphs available in Advanced TOML text.
+            sources[0] = panel_font_source();
+            for source in &mut sources[1..] {
+                if let imgui::FontSource::TtfData { size_pixels, .. } = source {
+                    *size_pixels = PANEL_FONT_SIZE;
+                }
+            }
+            self.panel_font = ctx.fonts().add_font(&sources).into();
             tracing::info!("Font loaded");
             IconManager::load(render_context);
         );
@@ -89,6 +111,15 @@ impl ImguiRenderLoop for RenderHook {
     fn before_render<'a>(&'a mut self, ctx: &mut Context, render_context: &'a mut dyn RenderContext) {
         guard!(
             self.try_resize_font(ctx);
+            let was_open = self.display_settings.shown;
+            self.display_settings.update();
+            if !was_open && self.display_settings.shown {
+                self.preview_controller_style = self.prev_type == WheelType::None || self.prev_controller_style;
+                self.preview_type = match self.prev_type {
+                    WheelType::None => WheelType::QuickItems,
+                    visible_wheel => visible_wheel,
+                };
+            }
             let hdr = Settings::read_or_default();
             hudhook::set_dx12_hdr_settings(
                 hdr.hdr_enabled,
@@ -114,6 +145,11 @@ impl ImguiRenderLoop for RenderHook {
         );
     }
 
+    fn message_filter(&self, _io: &imgui::Io) -> hudhook::MessageFilter {
+        if self.display_settings.shown { hudhook::MessageFilter::InputAll }
+        else { hudhook::MessageFilter::empty() }
+    }
+
     fn render(&mut self, ui: &mut Ui) {
         #[cfg(feature = "settings-diagnostics")]
         if hudhook::settings_diagnostics::sampled() {
@@ -122,18 +158,22 @@ impl ImguiRenderLoop for RenderHook {
         }
         guard!(
             let font = ui.push_font(self.font.into());
+            let controller_style = using_controller();
             let (wheel_type, quick_items, spells) = ItemWheelData::get(|data|
                 (data.wheel_type, data.quick_items.clone(), data.spells.clone())
             );
 
             let settings = Settings::read_or_default();
+            let layout = (settings.icon_scale_multiplier, settings.radius_multiplier, ui.io().display_size);
+            let layout_changed = self.prev_layout != Some(layout);
+            self.prev_layout = Some(layout);
 
-            if (self.prev_type != WheelType::None) && (wheel_type == WheelType::None) &&
+            if !self.display_settings.shown && (self.prev_type != WheelType::None) && (wheel_type == WheelType::None) &&
                 !using_controller() && settings.center_on_close {
                 reset_cursor_pos();
             }
 
-            let switch_items = settings.switch_instantly || (self.prev_type != wheel_type);
+            let switch_items = !self.display_settings.shown && (settings.switch_instantly || (self.prev_type != wheel_type));
             if switch_items {
                 self.switch_item();
             }
@@ -160,14 +200,14 @@ impl ImguiRenderLoop for RenderHook {
                         tracing::info!("Process window size: {:?}", get_window_size());
                     }
 
-                    if self.prev_spells != spells {
+                    if self.prev_spells != spells || layout_changed {
                         if is_debugging() {
                             tracing::info!("Remaking display spells");
                         }
                         self.display_spells = DisplayItem::from_items(ui, &spells);
                     }
                     self.display_spells.sort_by_key(|di| OrderedFloat(di.highlight_time));
-                    if self.prev_quick_items != quick_items {
+                    if self.prev_quick_items != quick_items || layout_changed {
                         if is_debugging() {
                             tracing::info!("Remaking display quick items");
                         }
@@ -182,7 +222,16 @@ impl ImguiRenderLoop for RenderHook {
                         add_to_screen_debug(format!("Display quick items: {:?}", self.display_quick_items));
                     }
 
-                    let display_items = match wheel_type {
+                    let visible_type = if self.display_settings.shown {
+                        match self.preview_type {
+                            WheelType::QuickItems if quick_items.is_empty() => WheelType::Spells,
+                            WheelType::Spells if spells.is_empty() => WheelType::QuickItems,
+                            preview => preview,
+                        }
+                    } else {
+                        wheel_type
+                    };
+                    let display_items = match visible_type {
                         WheelType::Spells => &mut self.display_spells,
                         WheelType::QuickItems => &mut self.display_quick_items,
                         WheelType::None => &mut vec![],
@@ -196,30 +245,20 @@ impl ImguiRenderLoop for RenderHook {
                     self.prev_quick_items = quick_items;
 
                     let draw_list = ui.get_window_draw_list();
-                    render_wheel(display_items, ui, &draw_list);
+                    if self.display_settings.shown {
+                        crate::rendering::wheel_renderer::render_wheel_preview(display_items, ui, &draw_list, self.preview_controller_style);
+                    } else { render_wheel(display_items, ui, &draw_list, controller_style); }
                 });
 
-            ui.window("Settings")
-                .position([0.0, 0.0], imgui::Condition::Always)
-                .size([sw, sh], imgui::Condition::Always)
-                .flags(
-                    WindowFlags::NO_TITLE_BAR |
-                    WindowFlags::NO_RESIZE |
-                    WindowFlags::NO_SCROLLBAR |
-                    WindowFlags::NO_SCROLL_WITH_MOUSE |
-                    WindowFlags::NO_BACKGROUND
-                )
-                .bg_alpha(0.0)
-                .movable(false)
-                .build(|| {
-                    self.display_settings.update();
-
-                    let draw_list = ui.get_window_draw_list();
-                    self.display_settings.draw(ui, &draw_list);
-                    draw_popups(ui, &draw_list);
-                });
+            let draw_list = ui.get_foreground_draw_list();
+            if self.display_settings.shown {
+                let _panel_font = ui.push_font(self.panel_font.into());
+                self.display_settings.draw(ui);
+            }
+            draw_popups(ui, &draw_list);
 
             self.prev_type = wheel_type;
+            self.prev_controller_style = controller_style;
             font.pop();
             #[cfg(feature = "settings-diagnostics")]
             if hudhook::settings_diagnostics::sampled() {

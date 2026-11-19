@@ -5,3 +5,5 @@ build/spellwheel-ems.dll
 build/build_and_zip.ps1
 build/Spell and Item Wheel.zip
 build/Spell and Item Wheel (with EMS support).zip
+
+artifacts/

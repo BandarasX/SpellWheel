@@ -1,376 +1,89 @@
 pub mod display_settings;
+pub mod input_policy;
+pub mod panel_model;
+mod values;
 pub mod visual_toml_parser;
+pub use values::*;
 
 use crate::debugging::{run_every, run_once};
-use lazy_static::lazy_static;
-use std::fs::{read_to_string, write};
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use crate::keyboard::settings_shortcut;
+use panel_model::{RuntimeSettings, binding, read_disk};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use serde::{Deserialize, Deserializer};
-use crate::paths;
 
-macro_rules! settings {
-    ($($name:ident: $t:ty),*$(,)?) => {
-        pub const KEYS: &[&str] = &[
-            $(stringify!($name),)*
-        ];
+static RUNTIME: OnceLock<Mutex<RuntimeSettings>> = OnceLock::new();
 
-        #[derive(Clone)]
-        pub struct Settings {
-            $(
-                pub $name: $t
-            ),*
-        }
-
-        impl<'de> serde::Deserialize<'de> for Settings {
-            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                use serde::de::{MapAccess, Visitor};
-                use std::fmt;
-
-                struct SettingsVisitor;
-
-                impl<'de> Visitor<'de> for SettingsVisitor {
-                    type Value = Settings;
-
-                    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                        write!(f, "a settings map")
-                    }
-
-                    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Settings, A::Error> {
-                        let mut this = Settings::default();
-
-                        while let Some(key) = map.next_key::<String>()? {
-                            match key.as_str() {
-                                $(stringify!($name) => {
-                                    this.$name = map.next_value()?;
-                                })*
-                                _ => { map.next_value::<serde::de::IgnoredAny>()?; }
-                            }
-                        }
-
-                        Ok(this)
-                    }
-                }
-
-                deserializer.deserialize_map(SettingsVisitor)
-            }
-        }
-
-        impl Default for Settings {
-            fn default() -> Self {
-                Self {
-                    $(
-                        $name: $name()
-                    ),*
-                }
-            }
-        }
-    };
-}
-
-settings!(
-    spell_wheel_enabled: bool,
-    item_wheel_enabled: bool,
-    spells_key: String,
-    quick_items_key: String,
-    style: String,
-    highlight_time: f32,
-    highlight_expansion: f32,
-    controller_wheel_open_delay: f32,
-    center_on_close: bool,
-    switch_instantly: bool,
-    item_names: String,
-    text_shadows: bool,
-    icon_tint: [f32; 4],
-    icon_background_tint: [f32; 4],
-    name_tint: [f32; 4],
-    font_scale_multiplier: f32,
-    icon_scale_multiplier: f32,
-    radius_multiplier: f32,
-    mouse_min_radius: f32,
-    controller_min_radius: f32,
-    mods: Vec<String>,
-    modded_spells: Vec<String>,
-    await_xinput_hook: bool,
-    debugging: bool,
-    timing_offset: f32,
-    force_rgba: bool,
-    hdr_enabled: bool,
-    hdr_ui_brightness: f32,
-    hdr_ui_saturation: f32,
-);
-
-pub fn spell_wheel_enabled() -> bool {
-    true
-}
-
-pub fn item_wheel_enabled() -> bool {
-    true
-}
-
-pub fn spells_key() -> String {
-    "INGAME".to_string()
-}
-
-pub fn quick_items_key() -> String {
-    "INGAME".to_string()
-}
-
-pub const fn center_on_close() -> bool {
-    true
-}
-
-pub fn style() -> String {
-    "pretty".to_string()
-}
-
-pub const fn highlight_time() -> f32 {
-    0.15
-}
-
-pub const fn highlight_expansion() -> f32 {
-    0.15
-}
-
-pub const fn controller_wheel_open_delay() -> f32 {
-    0.5
-}
-
-pub const fn switch_instantly() -> bool {
-    true
-}
-
-pub fn item_names() -> String {
-    "show".to_string()
-}
-
-pub const fn text_shadows() -> bool {
-    true
-}
-
-pub const fn icon_tint() -> [f32; 4] {
-    [1.0; 4]
-}
-
-pub const fn icon_background_tint() -> [f32; 4] {
-    [1.0; 4]
-}
-
-pub const fn name_tint() -> [f32; 4] {
-    [1.0; 4]
-}
-
-pub const fn debugging() -> bool {
-    false
-}
-
-pub const fn font_scale_multiplier() -> f32 {
-    1.0
-}
-
-pub const fn icon_scale_multiplier() -> f32 {
-    0.15
-}
-
-pub const fn radius_multiplier() -> f32 {
-    0.3
-}
-
-pub fn mods() -> Vec<String> {
-    Vec::new()
-}
-
-pub fn modded_spells() -> Vec<String> {
-    Vec::new()
-}
-
-pub const fn await_xinput_hook() -> bool {
-    false
-}
-
-pub const fn mouse_min_radius() -> f32 {
-    0.3
-}
-
-pub const fn controller_min_radius() -> f32 {
-    0.9
-}
-
-pub const fn timing_offset() -> f32 {
-    0.0
-}
-
-pub const fn force_rgba() -> bool {
-    false
-}
-
-pub const fn hdr_enabled() -> bool {
-    false
-}
-
-pub const fn hdr_ui_brightness() -> f32 {
-    200.0
-}
-
-pub const fn hdr_ui_saturation() -> f32 {
-    1.0
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum ItemNames {
-    Show,
-    Center,
-    Hide
-}
-
-impl<S: AsRef<str>> From<S> for ItemNames {
-    fn from(value: S) -> Self {
-        match value.as_ref().to_lowercase().as_str() {
-            "show" => Self::Show,
-            "center" => Self::Center,
-            "hide" => Self::Hide,
-            _ => Self::Show,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Style {
-    Simple,
-    Pretty
-}
-
-impl<S: AsRef<str>> From<S> for Style {
-    fn from(value: S) -> Self {
-        match value.as_ref().to_lowercase().as_str() {
-            "simple" => Self::Simple,
-            "pretty" => Self::Pretty,
-            _ => Self::Pretty,
-        }
-    }
-}
-
-pub struct SettingsContext {
-    src: Arc<str>,
-    settings: Settings,
-}
-
-impl Default for SettingsContext {
-    fn default() -> Self {
-        Self {
-            src: "".into(),
-            settings: Default::default(),
-        }
-    }
-}
-
-pub enum SCRes {
-    Ok(SettingsContext),
-    ParseErr(SettingsContext, anyhow::Error),
-    Err(anyhow::Error)
-}
-
-impl SCRes {
-    pub fn into_sc(self) -> Option<SettingsContext> {
-        match self {
-            SCRes::Ok(sc) => Some(sc),
-            SCRes::ParseErr(sc, _) => Some(sc),
-            SCRes::Err(_) => None,
-        }
-    }
-
-    pub fn into_sc_or(self, sc: SettingsContext) -> SettingsContext {
-        self.into_sc().unwrap_or(sc)
-    }
-
-    pub fn into_sc_or_else<F: FnOnce() -> SettingsContext>(self, f: F) -> SettingsContext {
-        self.into_sc().unwrap_or_else(f)
-    }
-
-    pub fn get_err(&self) -> Option<&anyhow::Error> {
-        match self {
-            SCRes::Ok(_) => None,
-            SCRes::ParseErr(_, err) => Some(err),
-            SCRes::Err(err) => Some(err),
-        }
-    }
-}
-
-impl SettingsContext {
-    pub fn open_toml() -> SCRes {
-        let settings_path = paths::settings();
-        let src = match read_to_string(&settings_path) {
-            Ok(src) => src,
-            Err(err) => {
-                tracing::error!("Tried to look for settings in {settings_path:?}, but encountered an error");
-                return SCRes::Err(err.into());
-            }
-        };
-
-        match toml::from_str(&src) {
-            Ok(settings) => {
-                SCRes::Ok(Self {
-                    src: src.into(),
-                    settings,
-                })
-            }
-            Err(err) => {
-                SCRes::ParseErr(
-                    Self {
-                        src: src.into(),
-                        settings: Settings::default(),
-                    },
-                    err.into()
-                )
-            }
-        }
-    }
-
-    pub fn read_or_default() -> RwLockReadGuard<'static, Self> {
-        run_every!("SettingsContext::read_or_default" every Duration::from_secs(1) => {
-            Self::load();
+fn runtime() -> &'static Mutex<RuntimeSettings> {
+    RUNTIME.get_or_init(|| {
+        let settings = load_disk().unwrap_or_else(|e| {
+            tracing::error!(
+                "Settings startup: {e}; using safe compatibility defaults without rewriting disk"
+            );
+            Settings::default()
         });
+        settings_shortcut::configure(
+            binding(&settings).unwrap_or(crate::keyboard::settings_binding::Binding::DEFAULT),
+        );
+        Mutex::new(RuntimeSettings::new(settings))
+    })
+}
 
-        SETTINGS_CACHE.read().expect("Could not acquire settings cache")
+fn load_disk() -> Result<Settings, String> {
+    let text = read_disk(&crate::paths::settings())?.unwrap_or_else(panel_model::new_document);
+    let (settings, warning) = panel_model::parse_startup(&text)?;
+    if let Some(warning) = warning {
+        tracing::error!("{warning}");
     }
+    Ok(settings)
+}
 
-    fn load() {
-        let sc = SettingsContext::open_toml();
-        if let Some(err) = sc.get_err() {
-            tracing::error!("Could not open settings TOML, using default settings instead: {err}");
-        }
-        let ctx = sc.into_sc_or_else(SettingsContext::default);
-        *SETTINGS_CACHE.write().expect("Could not acquire settings cache") = ctx;
+pub struct SettingsContext;
+impl SettingsContext {
+    pub fn begin_editing() -> Settings {
+        let mut rt = runtime().lock().expect("settings runtime");
+        rt.editing = true;
+        rt.saved.clone()
     }
-
-    pub fn save(text: &str) {
-        let path = paths::settings();
-        if let Err(err) = write(path, text) {
-            tracing::error!("Error saving settings: {err}");
-        }
-        Self::load();
+    pub fn end_editing() {
+        let mut rt = runtime().lock().expect("settings runtime");
+        rt.discard();
+        rt.editing = false;
+    }
+    pub fn preview(settings: &Settings) {
+        runtime()
+            .lock()
+            .expect("settings runtime")
+            .preview(settings);
+    }
+    pub fn discard_preview() {
+        runtime().lock().expect("settings runtime").discard();
+    }
+    pub fn committed(settings: &Settings) {
+        runtime().lock().expect("settings runtime").commit(settings);
+        settings_shortcut::configure(binding(settings).expect("saved binding validated"));
+    }
+    pub fn saved_runtime() -> Settings {
+        runtime().lock().expect("settings runtime").saved.clone()
     }
 }
 
-lazy_static!(
-    static ref SETTINGS_CACHE: Arc<RwLock<SettingsContext>> = Arc::new(RwLock::new(SettingsContext::default()));
-);
 impl Settings {
     pub fn read_or_default() -> Self {
-        run_every!("Settings::read_or_default" every Duration::from_secs(1) => {
-            let sc = SettingsContext::open_toml();
-            if let Some(err) = sc.get_err() {
-                tracing::error!("Could not open settings TOML, using default settings instead: {err}");
+        let rt = runtime();
+        run_every!("settings disk refresh" every Duration::from_secs(1) => {
+            let mut rt = rt.lock().expect("settings runtime");
+            if !rt.editing {
+                match load_disk() {
+                    Ok(settings) => {
+                        rt.refresh(&settings);
+                        settings_shortcut::configure(binding(&settings).expect("validated binding"));
+                    }
+                    Err(e) => tracing::error!("Settings refresh ignored; last valid runtime retained: {e}"),
+                }
             }
-            let ctx = sc.into_sc_or_else(SettingsContext::default);
-            let out = ctx.settings.clone();
-            *SETTINGS_CACHE.write().expect("Could not acquire settings cache") = ctx;
-            return out;
         });
-
-        SETTINGS_CACHE.read().expect("Could not acquire settings cache").settings.clone()
+        rt.lock().expect("settings runtime").effective.clone()
     }
-    
     pub fn mods(&self) -> &[String] {
         match (self.mods.is_empty(), self.modded_spells.is_empty()) {
             (true, true) => &[],
@@ -385,27 +98,6 @@ impl Settings {
                 });
                 &self.mods
             }
-        }
-    }
-
-    pub fn item_names(&self) -> ItemNames {
-        self.item_names.as_str().into()
-    }
-
-    pub fn style(&self) -> Style {
-        self.style.as_str().into()
-    }
-    
-    // Returns the highlight time t normalized. Takes into account self.highlight_time = 0.
-    pub fn normalized_highlight_time(&self, t: f32) -> f32 {
-        if self.highlight_time == 0.0 {
-            if t > 0.0 {
-                1.0
-            } else {
-                0.0
-            }
-        } else {
-            t / self.highlight_time
         }
     }
 }

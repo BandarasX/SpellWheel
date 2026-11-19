@@ -244,7 +244,8 @@ unsafe extern "system" fn pipeline_wnd_proc(
     let message_filter =
         MessageFilter::from_bits_retain(shared_state.message_filter.load(Ordering::SeqCst));
 
-    if message_filter.is_blocking(msg) {
+    if crate::INPUT_MESSAGE_FILTER.get().is_some_and(|filter| filter(msg, wparam.0, lparam.0))
+        || message_filter.is_blocking(msg) {
         LRESULT(1)
     } else {
         CallWindowProcW(Some(shared_state.wnd_proc), hwnd, msg, wparam, lparam)

@@ -10,6 +10,8 @@ Download the Windows x64 DLL from the <a href="https://github.com/BandarasX/Spel
 
 The settings shortcut fix prevents one Left Shift + F10 release from toggling the editor twice when rendering is nested. The user-tested candidate stayed open and closed normally, with original controller spell/item cycling working. See the <a href="docs/spellwheel-settings-fix-chatgpt-handoff.md">complete investigation and handoff</a> for evidence and limitations.
 
+The isolated settings-panel candidate adds Appearance, HDR and Interface tabs with a shared Advanced TOML draft. See [panel behavior, schema, defaults and acceptance instructions](docs/spellwheel-panel.md). The accepted release linked above remains the rollback build; the panel candidate has not passed game acceptance or been published.
+
 <h2>Modded Spell Icons</h2>
 <p>
 In order to show icons of modded spells,

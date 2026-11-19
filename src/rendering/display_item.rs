@@ -9,7 +9,6 @@ use crate::settings::{ItemNames, Settings, Style};
 use imgui::{DrawListMut, Ui};
 use std::fmt::{Debug, Formatter};
 use std::time::Instant;
-use crate::gamepad::using_controller;
 
 pub struct Positions {
     pub img_c1: [f32; 2],
@@ -198,7 +197,7 @@ impl DisplayItem {
         self.last_tick = tick;
     }
 
-    pub fn draw(&self, settings: &Settings, ww: f32, wh: f32, img_dim: f32, num_items: usize, ui: &Ui, draw_list: &DrawListMut) {
+    pub fn draw(&self, settings: &Settings, ww: f32, wh: f32, img_dim: f32, num_items: usize, show_inner_ring: bool, ui: &Ui, draw_list: &DrawListMut) {
         let [cx, cy] = [ww / 2.0, wh / 2.0];
         
         let positions = Positions::new(&self.name, self.pos[0], self.pos[1], self.scale);
@@ -239,7 +238,9 @@ impl DisplayItem {
                 }
 
                 let col = u32::from_be_bytes([0xFE, primary_color[2], primary_color[1], primary_color[0]]);
-                self.draw_controller_arc(settings, ww, wh, img_dim, num_items, draw_list, cx, cy, col);
+                if show_inner_ring {
+                    self.draw_inner_ring_segment(settings, ww, wh, img_dim, num_items, draw_list, cx, cy, col);
+                }
 
                 if let ItemNames::Show = settings.item_names() {
                     draw_list.add_image(
@@ -265,7 +266,9 @@ impl DisplayItem {
                 if let ItemNames::Show = settings.item_names() {
                     self.name.draw(ui, positions.text_pos, settings.name_tint, Centered::X, settings.text_shadows);
                 }
-                self.draw_controller_arc(settings, ww, wh, img_dim, num_items, draw_list, cx, cy, 0xFE_FF_FF_FF);
+                if show_inner_ring {
+                    self.draw_inner_ring_segment(settings, ww, wh, img_dim, num_items, draw_list, cx, cy, 0xFE_FF_FF_FF);
+                }
             }
         }
         self.draw_centered_name(settings, ui, cx, cy);
@@ -297,30 +300,28 @@ impl DisplayItem {
         }
     }
 
-    fn draw_controller_arc(&self, settings: &Settings, ww: f32, wh: f32, img_dim: f32,
+    fn draw_inner_ring_segment(&self, settings: &Settings, ww: f32, wh: f32, img_dim: f32,
                            num_items: usize, draw_list: &DrawListMut, cx: f32, cy: f32, col: u32) {
-        if using_controller() {
-            let thickness = ww.min(wh) / 200.0;
+        let thickness = ww.min(wh) / 200.0;
 
-            let thickness_mul = if let Style::Pretty = settings.style() {
-                1.0 + settings.normalized_highlight_time(self.highlight_time)
-            } else {
-                1.0
-            };
+        let thickness_mul = if let Style::Pretty = settings.style() {
+            1.0 + settings.normalized_highlight_time(self.highlight_time)
+        } else {
+            1.0
+        };
 
-            let radius = settings.radius_multiplier * ww.min(wh) - img_dim;
+        let radius = settings.radius_multiplier * ww.min(wh) - img_dim;
 
-            let angle_offset = std::f32::consts::PI / num_items.max(2) as f32 - (thickness / radius).atan();
-            if is_debugging() {
-                add_to_screen_debug(format!("{angle_offset} {thickness} {radius} {}", (thickness / radius).atan()));
-            }
-
-            let bezier = arc_bezier(
-                cx, cy, radius, self.angle - angle_offset, self.angle + angle_offset
-            );
-            draw_list.add_bezier_curve(bezier[0], bezier[1], bezier[2], bezier[3], col)
-                .thickness(thickness * thickness_mul)
-                .build();
+        let angle_offset = std::f32::consts::PI / num_items.max(2) as f32 - (thickness / radius).atan();
+        if is_debugging() {
+            add_to_screen_debug(format!("{angle_offset} {thickness} {radius} {}", (thickness / radius).atan()));
         }
+
+        let bezier = arc_bezier(
+            cx, cy, radius, self.angle - angle_offset, self.angle + angle_offset
+        );
+        draw_list.add_bezier_curve(bezier[0], bezier[1], bezier[2], bezier[3], col)
+            .thickness(thickness * thickness_mul)
+            .build();
     }
 }

@@ -143,8 +143,8 @@ pub fn rotated_image(cx: f32, cy: f32, width: f32, height: f32, angle: f32) -> [
 }
 
 pub fn render_selector(settings: &Settings, items: &[DisplayItem], ww: f32, wh: f32, img_dim: f32,
-                       draw_list: &DrawListMut, mut angle: f32, can_select: bool) {
-    if using_controller() && !can_select {
+                       draw_list: &DrawListMut, mut angle: f32, can_select: bool, controller_style: bool) {
+    if controller_style && !can_select {
         return;
     }
     match settings.style() {
@@ -154,7 +154,7 @@ pub fn render_selector(settings: &Settings, items: &[DisplayItem], ww: f32, wh: 
             };
 
             let no_items_selected = !items.iter().any(|di| di.is_highlighted);
-            if no_items_selected && !using_controller() {
+            if no_items_selected && !controller_style {
                 return;
             }
 
@@ -189,7 +189,7 @@ pub fn render_selector(settings: &Settings, items: &[DisplayItem], ww: f32, wh: 
                 })
                 .unwrap_or([255.0, 255.0, 255.0, 0.0, 0.0]);
 
-            if !using_controller() {
+            if !controller_style {
                 angle = item_angle;
             }
             // let normalized_selection = (dist_sqr / min_dist_sqr).clamp(0.0, 1.0);
@@ -212,7 +212,7 @@ pub fn render_selector(settings: &Settings, items: &[DisplayItem], ww: f32, wh: 
                 .build();
         }
         Style::Simple => {
-            if !using_controller() || !can_select {
+            if !controller_style || !can_select {
                 return;
             }
 
@@ -252,19 +252,29 @@ pub fn render_selector(settings: &Settings, items: &[DisplayItem], ww: f32, wh: 
     }
 }
 
-pub fn render_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut) {
+pub fn render_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool) {
+    draw_wheel(items, ui, draw_list, true, controller_style);
+}
+
+/// Draw the wheel behind settings with selection frozen.
+pub fn render_wheel_preview(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool) {
+    draw_wheel(items, ui, draw_list, false, controller_style);
+}
+
+fn draw_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, interactive: bool, controller_style: bool) {
     draw_debug(ui, draw_list);
     if items.is_empty() {
         return;
     }
     let settings = Settings::read_or_default();
 
-    let selection = angle_and_dist_sqr(get_mouse_state().mouse_pos(), gamepad_state().right_stick);
+    let selection = if interactive { angle_and_dist_sqr(get_mouse_state().mouse_pos(), gamepad_state().right_stick) }
+        else { Selection::Cursor { angle: items.iter().find(|i| i.is_highlighted).map_or(0.0, |i| i.angle), dist_sqr: 0.0 } };
 
     let [ww, wh] = get_window_size();
 
     // Only select closest IF far enough away from the center
-    let can_select = selection.can_select();
+    let can_select = interactive && selection.can_select();
     if can_select {
         for item in items.iter_mut() {
             item.is_highlighted = false;
@@ -280,12 +290,13 @@ pub fn render_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut)
     }
 
     let img_dim = DisplayItem::img_dim();
-    render_selector(&settings, items, ww, wh, img_dim, draw_list, selection.angle(), can_select);
+    render_selector(&settings, items, ww, wh, img_dim, draw_list, selection.angle(), can_select, controller_style);
 
+    let show_inner_ring = controller_style || settings.keyboard_mouse_inner_ring;
     let num_items = items.len();
     for item in items.iter_mut() {
         item.tick(&settings);
-        item.draw(&settings, ww, wh, img_dim, num_items, ui, draw_list);
+        item.draw(&settings, ww, wh, img_dim, num_items, show_inner_ring, ui, draw_list);
     }
 }
 

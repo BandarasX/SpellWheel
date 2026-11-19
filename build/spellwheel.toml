@@ -16,6 +16,9 @@ quick_items_key = "INGAME"
 # The style of the spell / item wheel. Use "pretty" or "simple". Default is "pretty"
 style = "pretty"
 
+# Show the controller-style inner ring when opening with keyboard or mouse.
+keyboard_mouse_inner_ring = false
+
 # How long should the highlight effect for chosen items / spells last in the wheel.
 # Only affects things with "pretty" style. Default is 0.15.
 highlight_time = 0.15
@@ -83,3 +86,14 @@ await_xinput_hook = false
 
 # Forces RGBA encoding. Increases VRAM usage, but may fix rendering bugs. Default is false.
 force_rgba = false
+
+# Project defaults for new configurations. Existing files are never overwritten on upgrade.
+# The existing DX12 pipeline supports 50..2000 nits and saturation 0..2.
+hdr_enabled = true
+hdr_ui_brightness = 400.0
+hdr_ui_saturation = 1.0
+
+# Settings panel: F1..F12 with ONE of none, left_shift, left_ctrl, left_alt.
+# Invalid startup bindings recover to Left Shift + F10 without rewriting this file.
+settings_function_key = "F10"
+settings_modifier = "left_shift"

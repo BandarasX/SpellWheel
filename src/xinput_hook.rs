@@ -35,7 +35,13 @@ fn hooked_xinput_get_state(
     unsafe {
         let result = XInputHook.call(user_index, state);
 
+        if state.is_null() || result != 0 { return result; }
         *HOOKED_STATE.write().expect("Couldn't write to HOOKED_STATE") = *state;
+
+        if crate::settings::display_settings::display_settings_open() {
+            (*state).Gamepad = XINPUT_GAMEPAD::default();
+            return result;
+        }
 
         let suppress_camera = SUPPRESS_CAMERA.load(Ordering::Relaxed);
         if is_debugging() {

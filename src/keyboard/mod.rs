@@ -1,3 +1,4 @@
+pub mod settings_binding;
 use crate::io;
 use hudhook::windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use lazy_static::lazy_static;
