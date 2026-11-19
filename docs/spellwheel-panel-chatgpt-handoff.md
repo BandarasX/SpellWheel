@@ -1,4 +1,32 @@
-# ChatGPT handoff: approved Spell Wheel settings panel implementation
+# ChatGPT handoff for the Spell Wheel settings panel release
+
+Published 19 November 2026 on the `BandarasX/SpellWheel` fork. [GitHub release](https://github.com/BandarasX/SpellWheel/releases/tag/settings-panel-56c8ed2) · [Native Windows build](https://github.com/BandarasX/SpellWheel/actions/runs/44562619176)
+
+The release source is [`56c8ed24145c7c9002946047781af91fbf8a5447`](https://github.com/BandarasX/SpellWheel/commit/56c8ed24145c7c9002946047781af91fbf8a5447). The settings, renderer, input, dependencies and test sources match the locally built and in-game-tested candidate `0bb5bab17b85e720d4d30aa39b48b85be5fb4d4a`. The release packaging changes provide the panel release notes, install directions, provenance, and the Atkinson Hyperlegible font license. The published DLL is a separate native Windows x64/MSVC build. GitHub Actions passed the 43 panel/listener tests and 3 diagnostic transport tests before building it.
+
+## Acceptance and scope
+
+- `d8467e8` passed 45 of 47 required checks. The panel obscured the preview during the remaining two checks. Both checks passed on the next candidate, `51e2a80`, with the compact, movable panel, gold colors, Atkinson Hyperlegible, and percentage sliders. The optional blocked-Save check was skipped in that in-game run.
+- `e33df59` passed all six checks of the half-point sliders, exact-entry fields, darker Advanced editor, and automatic non-interactive preview. The default preview uses quick items and falls back to spells when needed.
+- `9c701da` passed all six checks of the optional keyboard/mouse inner ring and the controller-style automatic preview. A preview of an already visible wheel retains that wheel and its input style.
+- `0bb5bab` passed all nine required checks in the final checklist. The live Advanced values, controller delay, debug overlay, Discard, restart notice, shortcut, and wheel input paths were verified in-game. The optional blocked-Save check was skipped in-game. The automated suite verifies that the runtime settings stay intact after a failed Save.
+- The settings panel uses keyboard and mouse. The in-game tests did not validate a live Frame Generation switch. Configure Frame Generation before launch.
+
+See [the settings guide](spellwheel-panel.md) for the five restart-only settings, rollback, and configuration details. Keep `spellwheel.toml` when replacing the active DLL. The release ZIP contains the DLL, install instructions, build manifest, checksum, and font license.
+
+## Verified public downloads
+
+| Asset | SHA-256 |
+| --- | --- |
+| `spellwheel.dll` | `b564a8bbf477036a485cffd8a931d8b5a06f3dd89523f171d07e82f479b3022d` |
+| `spellwheel-settings-panel-windows-x64.zip` | `bef5b0a64de31e3d764b53455bb9e84d87ded5b8d7ff391c8edeebceabbba014` |
+| `AtkinsonHyperlegible-OFL.txt` | `b1bc2009cb315a5c6d1758bb28eb930c9f986a89ad9e6fe5661b6710f492ffc4` |
+
+Downloaded all five public assets and verified the checksums, ZIP contents, Windows x64 DLL header, and matching provenance. The DLL inside the ZIP is byte-identical to the direct download. The release tag points to the build commit and GitHub lists it as the latest release.
+
+## Historical implementation handoff for the first candidate
+
+The snapshot below documents the first local candidate. Use the release record above and the settings guide for the current status and behavior.
 
 Prepared 15 November 2026. Self-contained implementation and candidate-build report. This does not claim Elden Ring or native Windows acceptance.
 
