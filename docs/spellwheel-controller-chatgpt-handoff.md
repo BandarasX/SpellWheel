@@ -1,0 +1,20 @@
+# Spell Wheel controller release handoff
+
+The user accepted all in-game checks for candidate `c1c27699566313d2b5d93bda8f0d3ac760da5579` on Elden Ring App Ver. **1.17.2** / Calibrations Ver. **1.17.3**, then approved updating GitHub and publishing. The accepted Windows x64/MSVC candidate was cross-built with locked dependencies and Rust nightly-2026-11-13. Its DLL SHA-256 is `d2cd3d90077986f5aab3faf3bef1ca5f02dce5ef8928a6c8e000ff3cd8f744df`.
+
+Release packaging and documentation follow the accepted source. The Windows release workflow reruns the controller, panel/listener and diagnostic transport suites before building and publishing. The GitHub release's build provenance identifies the release source, Windows Actions run and release DLL hash. The native Actions DLL is a separate build. [GitHub releases](https://github.com/BandarasX/SpellWheel/releases)
+
+## Acceptance and implementation
+
+- `61678d3` fell through to vanilla controls when all six game input/HUD signature checks failed. `83a128d` restored hook retries and logged successful installation on executable product version **2.7.2.0**. The user reported that all gameplay checks passed except close audio.
+- A changed close reached the sound guard on `83a128d`. `c1c2769` uses the version-matched native sound routine and a readable event table. The final user check passed on both wheels, covering changed close, silent unchanged/returned/cancelled close, and a short tap with one native cycle and click on release.
+- The wheel state machine owns tap, hold, cancellation, and close selection. Native release requests pass through the equipment HUD update. Ranged precision aim and Telescope zoom own the press through release. The controller indicator snaps to its slot with an 8% angular margin per edge. The existing delay, radius, enablement and `switch_instantly` settings apply.
+- The accepted candidate passed 60 tests in the controller/panel/listener harness and 3 diagnostic transport tests. Its default release build and all-features Windows x64/MSVC check passed. The final native-game test was supplied by the user.
+
+Behavior, version-matched sources and acceptance steps are in [the controller candidate notes](spellwheel-controller-candidate.md). The prior [settings panel handoff](spellwheel-panel-chatgpt-handoff.md) records accepted panel behavior.
+
+## Installation and rollback
+
+Close Elden Ring, keep one active Spell Wheel DLL, and retain `spellwheel.toml`. Keep backup DLLs outside mod-loading folders. Set Frame Generation before launch. The live Frame Generation switch crash remains a separate issue.
+
+For rollback, restore just the backed-up DLL or the prior accepted settings-panel DLL with SHA-256 `b564a8bbf477036a485cffd8a931d8b5a06f3dd89523f171d07e82f479b3022d`. [Settings-panel release](https://github.com/BandarasX/SpellWheel/releases/tag/settings-panel-56c8ed2)

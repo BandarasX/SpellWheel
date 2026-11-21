@@ -1,6 +1,5 @@
-use crate::gamepad::{GamepadButtons, GamepadState, gamepad_state};
+use crate::gamepad::{GamepadButtons, LEFT_TRIGGER, RIGHT_TRIGGER};
 use crate::keyboard;
-use crate::settings::Settings;
 use bitfield::bitfield;
 use eldenring::cs::{CSInGamePad, UserInputKey};
 use lazy_static::lazy_static;
@@ -9,8 +8,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, RwLock};
 use windows::Win32::UI::Input::KeyboardAndMouse::{MAPVK_VSC_TO_VK_EX, MapVirtualKeyW};
 use windows::Win32::UI::Input::XboxController::{XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_BACK, XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_DPAD_RIGHT, XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_LEFT_SHOULDER, XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_SHOULDER, XINPUT_GAMEPAD_RIGHT_THUMB, XINPUT_GAMEPAD_START, XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_Y};
-use crate::debugging::add_to_screen_debug;
-use crate::keyboard::hook::{get_scroll, scrolled};
+use crate::keyboard::hook::scrolled;
 
 lazy_static!(
 	static ref SPELL_BINDINGS: Arc<RwLock<PhysicalKeys>> = Arc::new(RwLock::new(PhysicalKeys::none()));
@@ -93,7 +91,7 @@ impl Bindings {
 pub struct PhysicalKeys {
 	pub which_present: u8,
 	pub mouse: Result<u8, bool>,
-	pub pad: Result<GamepadButtons, bool>,
+	pub pad: u32,
 	pub key: u32,
 	pub unknown: i32,
 }
@@ -102,7 +100,6 @@ bitfield! {
 	#[derive(Clone, Copy, PartialEq, Eq)]
 	pub struct PressedStatus(u8);
 	pub mouse,  set_mouse:  0;
-	pub pad,    set_pad:    1;
 	pub key,    set_key:    2;
 	pub scroll, set_scroll: 3;
 }
@@ -112,7 +109,7 @@ impl PhysicalKeys {
 		Self {
 			which_present: 0,
 			mouse: Ok(0),
-			pad: Ok(GamepadButtons::default()),
+			pad: 0,
 			key: 0,
 			unknown: 0,
 		}
@@ -124,8 +121,11 @@ impl PhysicalKeys {
 	}
 
 	pub fn pad(&mut self, pad: Result<GamepadButtons, bool>) {
-		self.which_present |= 0b0010;
-		self.pad = pad;
+		self.pad |= match pad {
+			Ok(button) => u32::from(button.0),
+			Err(false) => LEFT_TRIGGER,
+			Err(true) => RIGHT_TRIGGER,
+		};
 	}
 
 	pub fn key(&mut self, key: u32) {
@@ -138,26 +138,12 @@ impl PhysicalKeys {
 		self.unknown = unknown;
 	}
 
-	pub fn pressed_status(&self, min_pad_press_length: Option<f32>) -> PressedStatus {
+	pub fn keyboard_mouse_status(&self) -> PressedStatus {
 		let mut ps = PressedStatus(0);
 		if self.which_present & 0b0001 != 0 {
 			match self.mouse {
 				Ok(mb) => ps.set_mouse(keyboard::is_pressed(mb as i32)),
 				Err(is_up) => ps.set_scroll(scrolled(is_up)),
-			}
-		}
-		if self.which_present & 0b0010 != 0 {
-			let controller_delay = Settings::read_or_default().controller_wheel_open_delay;
-			let [min, max] = if let Some(min_length) = min_pad_press_length {
-				[min_length, controller_delay]
-			} else {
-				[controller_delay, f32::MAX]
-			};
-			if min == 0.0 && max != 0.0 {
-				ps.set_pad(GamepadState::new_active_state().pressed_duration(self.pad).is_some());
-			} else if let Some(length) = gamepad_state().pressed_duration(self.pad) {
-				let length = length.as_secs_f32();
-				ps.set_pad(min <= length && length <= max);
 			}
 		}
 		if self.which_present & 0b0100 != 0 {
@@ -172,7 +158,7 @@ impl Debug for PhysicalKeys {
 		if self.which_present & 0b0001 != 0 {
 			write!(f, "mouse={:?} ", self.mouse)?;
 		}
-		if self.which_present & 0b0010 != 0 {
+		if self.pad != 0 {
 			write!(f, "pad={:?} ", self.pad)?;
 		}
 		if self.which_present & 0b0100 != 0 {
@@ -206,9 +192,6 @@ impl Debug for PressedStatus {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		if self.mouse() {
 			write!(f, "m")?;
-		}
-		if self.pad() {
-			write!(f, "p")?;
 		}
 		if self.key() {
 			write!(f, "k")?;

@@ -2,6 +2,7 @@ use crate::debugging::{add_to_screen_debug, is_debugging};
 use crate::hwindow::get_window_size;
 use crate::icons::AtlasIcon;
 use crate::icons::icon_manager::IconManager;
+use crate::io::controller_state::Slot;
 use crate::items::Item;
 use crate::rendering::wheel_renderer::arc_bezier;
 use crate::rendering::wrapped_text::{Centered, WrappedText};
@@ -81,7 +82,7 @@ impl Positions {
 }
 
 pub struct DisplayItem {
-    pub index: i32,
+    pub slot: Slot,
     pub icon: Option<AtlasIcon>,
     pub scale: f32,
     pub name: WrappedText,
@@ -95,7 +96,7 @@ pub struct DisplayItem {
 
 impl Debug for DisplayItem {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DisplayItem{{index={}, angle={:.3}}}", self.index, self.angle)
+        write!(f, "DisplayItem{{index={}, angle={:.3}}}", self.slot.index, self.angle)
     }
 }
 
@@ -141,7 +142,7 @@ impl DisplayItem {
 
                 let name = WrappedText::new(ui, img_dim, item.name());
 
-                let index = item.index();
+                let slot = Slot { index: item.index(), param_id: item.id() };
                 let icon = IconManager::get_item(item);
                 let scale = 1.0;
                 let is_highlighted = false;
@@ -149,7 +150,7 @@ impl DisplayItem {
                 let last_tick = Instant::now();
 
                 DisplayItem {
-                    index,
+                    slot,
                     icon,
                     name,
                     scale,

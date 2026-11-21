@@ -13,7 +13,9 @@ use crate::{guard, set_hwnd, set_selected_quick_item_index, set_selected_spell_i
 use hudhook::{ImguiRenderLoop, RenderContext};
 use imgui::{Context, Ui, WindowFlags};
 use ordered_float::OrderedFloat;
-use crate::gamepad::using_controller;
+use windows::Win32::UI::WindowsAndMessaging::{WM_ACTIVATEAPP, WM_KILLFOCUS};
+use crate::io::controller;
+use crate::io::controller_state::{Slot, VisibleWheel};
 use crate::icons::texture_manager::TextureManager;
 use crate::rendering::popup_renderer::{add_popup, draw_popups};
 use crate::settings::display_settings::{DisplaySettings, PANEL_FONT_SIZE, panel_font_source};
@@ -26,7 +28,8 @@ pub struct RenderHook {
     display_settings: DisplaySettings,
     prev_type: WheelType,
     preview_type: WheelType,
-    prev_controller_style: bool,
+    prev_controller_wheel: Option<VisibleWheel>,
+    controller_highlight: Option<Slot>,
     preview_controller_style: bool,
     prev_layout: Option<(f32, f32, [f32; 2])>,
     prev_spells: Vec<Item>,
@@ -43,7 +46,8 @@ impl RenderHook {
             display_settings: DisplaySettings::new(),
             prev_type: WheelType::None,
             preview_type: WheelType::None,
-            prev_controller_style: false,
+            prev_controller_wheel: None,
+            controller_highlight: None,
             preview_controller_style: true,
             prev_layout: None,
             prev_spells: vec![],
@@ -57,14 +61,14 @@ impl RenderHook {
                 if let Some(item) = self.display_spells.iter()
                     .find(|item| item.is_highlighted) {
 
-                    set_selected_spell_index(item.index);
+                    set_selected_spell_index(item.slot.index);
                 }
             }
             WheelType::QuickItems => {
                 if let Some(item) = self.display_quick_items.iter()
                     .find(|item| item.is_highlighted) {
 
-                    set_selected_quick_item_index(item.index);
+                    set_selected_quick_item_index(item.slot.index);
                 }
             }
             WheelType::None => {}
@@ -90,7 +94,12 @@ impl ImguiRenderLoop for RenderHook {
 
             tracing::info!("Loading font...");
 
-            hudhook::set_input_message_filter(crate::settings::display_settings::input_message_filter);
+            hudhook::set_input_message_filter(|message, key, lparam| {
+                if message == WM_KILLFOCUS || (message == WM_ACTIVATEAPP && key == 0) {
+                    controller::interrupt();
+                }
+                crate::settings::display_settings::input_message_filter(message, key, lparam)
+            });
             ctx.io_mut().config_flags.insert(imgui::ConfigFlags::NAV_ENABLE_KEYBOARD);
             ctx.io_mut().config_windows_move_from_title_bar_only = true;
             let mut sources = FontManager::generate_sources();
@@ -114,7 +123,8 @@ impl ImguiRenderLoop for RenderHook {
             let was_open = self.display_settings.shown;
             self.display_settings.update();
             if !was_open && self.display_settings.shown {
-                self.preview_controller_style = self.prev_type == WheelType::None || self.prev_controller_style;
+                controller::interrupt();
+                self.preview_controller_style = self.prev_type == WheelType::None || self.prev_controller_wheel.is_some();
                 self.preview_type = match self.prev_type {
                     WheelType::None => WheelType::QuickItems,
                     visible_wheel => visible_wheel,
@@ -158,10 +168,16 @@ impl ImguiRenderLoop for RenderHook {
         }
         guard!(
             let font = ui.push_font(self.font.into());
-            let controller_style = using_controller();
-            let (wheel_type, quick_items, spells) = ItemWheelData::get(|data|
-                (data.wheel_type, data.quick_items.clone(), data.spells.clone())
+            let (mut wheel_type, controller_wheel, quick_items, spells) = ItemWheelData::get(|data|
+                (data.wheel_type, data.controller_wheel, data.quick_items.clone(), data.spells.clone())
             );
+            let stick = controller_wheel.and_then(controller::right_stick);
+            if controller_wheel.is_some() && stick.is_none() {
+                wheel_type = WheelType::None;
+            }
+            if self.prev_controller_wheel != controller_wheel {
+                self.controller_highlight = None;
+            }
 
             let settings = Settings::read_or_default();
             let layout = (settings.icon_scale_multiplier, settings.radius_multiplier, ui.io().display_size);
@@ -169,11 +185,12 @@ impl ImguiRenderLoop for RenderHook {
             self.prev_layout = Some(layout);
 
             if !self.display_settings.shown && (self.prev_type != WheelType::None) && (wheel_type == WheelType::None) &&
-                !using_controller() && settings.center_on_close {
+                self.prev_controller_wheel.is_none() && settings.center_on_close {
                 reset_cursor_pos();
             }
 
-            let switch_items = !self.display_settings.shown && (settings.switch_instantly || (self.prev_type != wheel_type));
+            let switch_items = !self.display_settings.shown && self.prev_controller_wheel.is_none()
+                && (settings.switch_instantly || self.prev_type != wheel_type);
             if switch_items {
                 self.switch_item();
             }
@@ -247,7 +264,17 @@ impl ImguiRenderLoop for RenderHook {
                     let draw_list = ui.get_window_draw_list();
                     if self.display_settings.shown {
                         crate::rendering::wheel_renderer::render_wheel_preview(display_items, ui, &draw_list, self.preview_controller_style);
-                    } else { render_wheel(display_items, ui, &draw_list, controller_style); }
+                    } else if wheel_type != WheelType::None {
+                        let highlight = render_wheel(display_items, ui, &draw_list, stick, self.controller_highlight);
+                        if let Some(visible) = controller_wheel {
+                            self.controller_highlight = highlight;
+                            if let Some(slot) = highlight {
+                                controller::highlight(visible, slot);
+                            }
+                        }
+                    } else {
+                        crate::rendering::debug_renderer::draw_debug(ui, &draw_list);
+                    }
                 });
 
             let draw_list = ui.get_foreground_draw_list();
@@ -258,7 +285,7 @@ impl ImguiRenderLoop for RenderHook {
             draw_popups(ui, &draw_list);
 
             self.prev_type = wheel_type;
-            self.prev_controller_style = controller_style;
+            self.prev_controller_wheel = controller_wheel;
             font.pop();
             #[cfg(feature = "settings-diagnostics")]
             if hudhook::settings_diagnostics::sampled() {
@@ -275,6 +302,7 @@ pub struct ItemWheelData {
     pub spells: Vec<Item>,
     pub quick_items: Vec<Item>,
     pub wheel_type: WheelType,
+    pub controller_wheel: Option<VisibleWheel>,
 }
 
 impl ItemWheelData {
@@ -283,6 +311,7 @@ impl ItemWheelData {
             spells: vec![],
             quick_items: vec![],
             wheel_type: WheelType::None,
+            controller_wheel: None,
         }
     }
 

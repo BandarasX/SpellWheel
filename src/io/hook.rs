@@ -1,198 +1,350 @@
+use std::cell::Cell;
 use std::mem;
+use std::sync::{Mutex, Once, OnceLock};
+use std::time::{Duration, Instant};
+
+use fromsoftware_shared::Program;
+use fromsoftware_shared::game_version::GameVersion;
+use hudhook::windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+use hudhook::windows::Win32::System::Threading::GetCurrentProcess;
 use retour::GenericDetour;
-use std::sync::OnceLock;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use crate::debugging::add_to_screen_debug;
+
 use crate::io::bindings::{get_item_bindings, get_spell_bindings};
+use crate::io::controller_state::{TapReplay, Wheel};
 use crate::settings::Settings;
+use crate::settings::display_settings::display_settings_open;
 
-type GenericHookFn = unsafe extern "C" fn(usize, usize, usize, usize) -> usize;
+use super::controller;
+use super::hook_profiles::{
+    HOLD, HUD_UPDATE_PREFIX, HookProfile, INPUT_CHECKS, ITEM_REPEAT, ITEM_REQUEST, PROFILES,
+    ProbeRetry, SPELL_REPEAT, SPELL_REQUEST, select_profile,
+};
 
-const INPUT_CHECK_PREFIX: &[u8] = &[0x4C, 0x8B, 0xDC, 0x48, 0x83, 0xEC, 0x78, 0x49, 0xC7, 0x43, 0xA8];
-const SWITCH_HOLD_PREFIX: &[u8] = &[0x4C, 0x8B, 0xDC, 0x48, 0x81, 0xEC, 0x88, 0x00, 0x00, 0x00, 0x49, 0xC7, 0x43, 0x98];
+type InputCheck = unsafe extern "system" fn(usize, usize, usize, usize) -> bool;
+type HudUpdate = unsafe extern "system" fn(usize, usize, usize);
 
-struct Target {
-	name: &'static str,
-	rva: usize,
-	prefix: &'static [u8],
-	/// If set, only suppress when the 2nd argument (rdx) is one of these ids.
-	/// The hold check is one function shared by several actions, with the
-	/// action id as its second argument (13 = spell, 14 = item).
-	ids: Result<SuppressionType, &'static [(u32, SuppressionType)]>,
-	controller_suppression_length: f32,
+const HUD_SPELL_VISIBLE_OFFSET: usize = 0x4D;
+
+static PROBE_RETRY: Mutex<ProbeRetry> = Mutex::new(ProbeRetry::new());
+static PROFILE: OnceLock<&'static HookProfile> = OnceLock::new();
+static FIRST_INPUT: [Once; INPUT_CHECKS.len()] = [const { Once::new() }; INPUT_CHECKS.len()];
+static FIRST_HUD: Once = Once::new();
+static INPUT_HOOKS: [OnceLock<GenericDetour<InputCheck>>; INPUT_CHECKS.len()] =
+    [const { OnceLock::new() }; INPUT_CHECKS.len()];
+static HUD_HOOK: OnceLock<GenericDetour<HudUpdate>> = OnceLock::new();
+
+thread_local! {
+    static HUD_REPLAY: Cell<Option<TapReplay>> = const { Cell::new(None) };
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SuppressionType {
-	Spell,
-	Item,
-	Both,
+fn take_replay(wheel: Wheel) -> bool {
+    HUD_REPLAY.with(|scope| {
+        let Some(mut replay) = scope.get() else {
+            return false;
+        };
+        let requested = replay.request(wheel);
+        scope.set(Some(replay));
+        requested
+    })
 }
 
-const NUM_HOOKS: usize = 5;
-const TARGETS: [Target; NUM_HOOKS] = [
-	Target {
-		name: "Switch Spell request",
-		rva: 0x7595D0,
-		prefix: INPUT_CHECK_PREFIX,
-		ids: Ok(SuppressionType::Spell),
-		controller_suppression_length: 0.0,
-	},
-	Target {
-		name: "Switch Item request",
-		rva: 0x759560,
-		prefix: INPUT_CHECK_PREFIX,
-		ids: Ok(SuppressionType::Item),
-		controller_suppression_length: 0.0,
-	},
-	Target {
-		name: "Switch Spell repeat",
-		rva: 0x759B30,
-		prefix: INPUT_CHECK_PREFIX,
-		ids: Ok(SuppressionType::Spell),
-		controller_suppression_length: 0.5,
-	},
-	Target {
-		name: "Switch Item repeat",
-		rva: 0x759880,
-		prefix: INPUT_CHECK_PREFIX,
-		ids: Ok(SuppressionType::Item),
-		controller_suppression_length: 0.5,
-	},
-	Target {
-		name: "Switch Spell / Item hold",
-		rva: 0x759720,
-		prefix: SWITCH_HOLD_PREFIX,
-		ids: Err(&[
-			(13, SuppressionType::Spell),
-			(14, SuppressionType::Item),
-		]),
-		controller_suppression_length: 0.5,
-	},
+unsafe extern "system" fn input_hook<const I: usize>(
+    a: usize,
+    b: usize,
+    c: usize,
+    d: usize,
+) -> bool {
+    FIRST_INPUT[I]
+        .call_once(|| tracing::info!(hook = INPUT_CHECKS[I].0, "Controller input hook called"));
+    if display_settings_open() {
+        return false;
+    }
+    let original = INPUT_HOOKS[I].get().unwrap();
+    let wheel = match (I, b as u32) {
+        (SPELL_REQUEST | SPELL_REPEAT, _) | (HOLD, 13) => Wheel::Spells,
+        (ITEM_REQUEST | ITEM_REPEAT, _) | (HOLD, 14) => Wheel::QuickItems,
+        _ => return original.call(a, b, c, d),
+    };
+
+    if matches!(I, SPELL_REQUEST | ITEM_REQUEST)
+        && take_replay(wheel)
+        && controller::can_replay_tap()
+    {
+        original.call(a, b, c, d);
+        return true;
+    }
+
+    let settings = Settings::read_or_default();
+    let (enabled, key, bindings) = match wheel {
+        Wheel::Spells => (
+            settings.spell_wheel_enabled,
+            &settings.spells_key,
+            get_spell_bindings(),
+        ),
+        Wheel::QuickItems => (
+            settings.item_wheel_enabled,
+            &settings.quick_items_key,
+            get_item_bindings(),
+        ),
+    };
+    let pressed = bindings.keyboard_mouse_status();
+    let native_keyboard_mouse = pressed.scroll()
+        || ((pressed.key() || pressed.mouse()) && !key.eq_ignore_ascii_case("ingame"));
+    if !enabled
+        || native_keyboard_mouse
+        || controller::native_passthrough(wheel, bindings.pad, controller_hooks_ready(wheel))
+    {
+        return original.call(a, b, c, d);
+    }
+    false
+}
+
+unsafe fn spell_visible(hud_context: usize) -> Option<bool> {
+    if hud_context == 0 {
+        return None;
+    }
+    let state = usize::from_ne_bytes(read_game_value(hud_context)?);
+    if state == 0 {
+        return None;
+    }
+    read_game_value(state + HUD_SPELL_VISIBLE_OFFSET).map(|[visible]| visible != 0)
+}
+
+unsafe extern "system" fn hud_update(hud_context: usize, b: usize, c: usize) {
+    FIRST_HUD.call_once(|| tracing::info!("Equipment HUD hook called"));
+    let original = HUD_HOOK.get().unwrap();
+    if let Some(outer) = HUD_REPLAY.with(|scope| scope.replace(Some(TapReplay::default()))) {
+        original.call(hud_context, b, c);
+        HUD_REPLAY.with(|scope| scope.set(Some(outer)));
+        return;
+    }
+
+    let settings = Settings::read_or_default();
+    let mut taps = controller::take_taps(&settings);
+    let spell_hud = if taps[Wheel::Spells.index()] {
+        spell_visible(hud_context)
+    } else {
+        None
+    };
+    if taps[Wheel::Spells.index()] && spell_hud.is_none() {
+        tracing::debug!("Dropped controller spell tap because HUD visibility is unavailable");
+        taps[Wheel::Spells.index()] = false;
+    }
+    HUD_REPLAY.with(|scope| scope.set(Some(TapReplay::new(taps, spell_hud.unwrap_or(false)))));
+    original.call(hud_context, b, c);
+    let unused = HUD_REPLAY
+        .with(|scope| scope.replace(None))
+        .unwrap_or_default();
+    if settings.debugging && taps.into_iter().any(|tap| tap) {
+        tracing::info!(
+            ?taps,
+            ?spell_hud,
+            ?unused,
+            "Controller tap during equipment HUD update"
+        );
+    }
+}
+
+const INPUT_FNS: [InputCheck; INPUT_CHECKS.len()] = [
+    input_hook::<SPELL_REQUEST>,
+    input_hook::<ITEM_REQUEST>,
+    input_hook::<SPELL_REPEAT>,
+    input_hook::<ITEM_REPEAT>,
+    input_hook::<HOLD>,
 ];
-static HOOKS: [OnceLock<GenericDetour<GenericHookFn>>; NUM_HOOKS] = [const { OnceLock::new() }; NUM_HOOKS];
 
-unsafe extern "C" fn generic_hook<const I: usize>(a: usize, b: usize, c: usize, d: usize) -> usize {
-	if crate::settings::display_settings::display_settings_open() { return 0; }
-	let settings = Settings::read_or_default();
-	let items_key_ingame = settings.quick_items_key.to_lowercase() == "ingame";
-	let spells_key_ingame = settings.spells_key.to_lowercase() == "ingame";
-
-	let target = &TARGETS[I];
-
-	let items_pressed = get_item_bindings()
-		.pressed_status(Some(target.controller_suppression_length));
-	let spells_pressed = get_spell_bindings()
-		.pressed_status(Some(target.controller_suppression_length));
-
-	let supp_type = match target.ids {
-		Ok(supp_type) => supp_type,
-		Err(supp_types) => supp_types.iter()
-			.find(|(id, _)| *id == b as u32)
-			.map(|(_, supp_type)| *supp_type)
-			.unwrap_or(SuppressionType::Both),
-	};
-
-	let mut ignore = true;
-	match supp_type {
-		SuppressionType::Item => {
-			if !settings.item_wheel_enabled {
-				ignore = false;
-			}
-			// Cycle if mouse button is scroll
-			if items_pressed.scroll() {
-				ignore = false;
-			}
-			// Cycle if pressed in-game key while control is not in-game
-			if (items_pressed.key() || items_pressed.mouse()) && !items_key_ingame {
-				ignore = false;
-			}
-			// Cycle if pressed button for less than opening time
-			if items_pressed.pad() {
-				ignore = false;
-			}
-		}
-		SuppressionType::Spell => {
-			if !settings.spell_wheel_enabled {
-				ignore = false;
-			}
-			// Cycle if mouse button is scroll
-			if spells_pressed.scroll() {
-				ignore = false;
-			}
-			// Cycle if pressed in-game key while control is not in-game
-			if (spells_pressed.key() || spells_pressed.mouse()) && !spells_key_ingame {
-				ignore = false;
-			}
-			// Cycle if pressed button for less than opening time
-			if spells_pressed.pad() {
-				ignore = false;
-			}
-		}
-		_ => {}
-	}
-	if ignore {
-		return 0;
-	}
-
-	let res = HOOKS[I].get().unwrap().call(a, b, c, d);
-
-	res
+pub(super) fn controller_hooks_ready(wheel: Wheel) -> bool {
+    let pair = match wheel {
+        Wheel::Spells => [SPELL_REQUEST, SPELL_REPEAT],
+        Wheel::QuickItems => [ITEM_REQUEST, ITEM_REPEAT],
+    };
+    HUD_HOOK.get().is_some_and(GenericDetour::is_enabled)
+        && [pair[0], pair[1], HOLD]
+            .into_iter()
+            .all(|i| INPUT_HOOKS[i].get().is_some_and(GenericDetour::is_enabled))
 }
 
-const HOOK_FNS: [GenericHookFn; NUM_HOOKS] = [
-	generic_hook::<0>, generic_hook::<1>, generic_hook::<2>, generic_hook::<3>, generic_hook::<4>
-];
+pub(super) fn module_base() -> usize {
+    unsafe { GetModuleHandleW(std::ptr::null()) as usize }
+}
 
-fn module_base() -> usize {
-	unsafe { GetModuleHandleW(std::ptr::null()) as usize }
+fn read_game_memory(address: usize, data: &mut [u8]) -> Result<(), String> {
+    let mut bytes_read = 0;
+    unsafe {
+        ReadProcessMemory(
+            GetCurrentProcess(),
+            address as *const _,
+            data.as_mut_ptr().cast(),
+            data.len(),
+            Some(&mut bytes_read),
+        )
+    }
+    .map_err(|err| err.to_string())?;
+    if bytes_read == data.len() {
+        Ok(())
+    } else {
+        Err(format!("read {bytes_read} of {} bytes", data.len()))
+    }
+}
+
+pub(super) fn read_game_value<const N: usize>(address: usize) -> Option<[u8; N]> {
+    let mut data = [0; N];
+    read_game_memory(address, &mut data).ok()?;
+    Some(data)
+}
+
+pub(super) fn matches_prefix(address: usize, prefix: &[u8]) -> bool {
+    let mut data = [0; 16];
+    let data = &mut data[..prefix.len()];
+    read_game_memory(address, data).is_ok() && data == prefix
+}
+
+#[derive(Debug)]
+struct ExecutableVersion {
+    product_version: String,
+    language: u16,
+}
+
+impl GameVersion for ExecutableVersion {
+    const NAME: &'static str = "elden ring";
+
+    fn from_lang_version(language: u16, version: &str) -> Option<Self> {
+        Some(Self {
+            product_version: version.to_owned(),
+            language,
+        })
+    }
+}
+
+fn log_build() {
+    let file_size = std::fs::metadata(crate::paths::game())
+        .ok()
+        .map(|file| file.len());
+    if let Program::Mapping(image) = Program::current() {
+        match ExecutableVersion::detect(&image) {
+            Ok(version) => tracing::info!(
+                product_version = %version.product_version,
+                language = version.language,
+                ?file_size,
+                candidate = option_env!("SPELLWHEEL_DIAGNOSTIC_REVISION").unwrap_or("unrecorded"),
+                "Executable version for controller hooks"
+            ),
+            Err(err) => tracing::warn!(%err, "Could not identify the executable version"),
+        }
+    }
+}
+
+fn log_unmatched(base: usize) {
+    for profile in &PROFILES {
+        for (name, rva, expected) in profile.signatures() {
+            let mut actual = [0; 16];
+            let actual = &mut actual[..expected.len()];
+            match read_game_memory(base + rva, actual) {
+                Ok(()) if actual == expected => {}
+                Ok(()) => tracing::warn!(
+                    profile = profile.name,
+                    hook = name,
+                    rva = format_args!("{rva:#x}"),
+                    expected = ?expected,
+                    actual = ?actual,
+                    "Controller hook byte mismatch"
+                ),
+                Err(err) => tracing::warn!(
+                    profile = profile.name,
+                    hook = name,
+                    rva = format_args!("{rva:#x}"),
+                    %err,
+                    "Could not read controller hook bytes"
+                ),
+            }
+        }
+    }
+    tracing::warn!("Controller hook profile unavailable; will retry");
+}
+
+pub(super) fn profile() -> Option<&'static HookProfile> {
+    PROFILE.get().copied()
 }
 
 pub fn install_io_hooks() {
-	unsafe {
-		let base = module_base();
+    if PROFILE.get().is_some() {
+        return;
+    }
+    let mut retry = PROBE_RETRY.lock().unwrap();
+    if PROFILE.get().is_some() {
+        return;
+    }
+    let Some(first_probe) = retry.poll(Instant::now()) else {
+        return;
+    };
+    let base = module_base();
+    if first_probe {
+        log_build();
+    }
+    let Some(profile) = select_profile(|rva, prefix| matches_prefix(base + rva, prefix)) else {
+        if first_probe || retry.should_report(Instant::now(), Duration::from_secs(10)) {
+            log_unmatched(base);
+        }
+        return;
+    };
+    unsafe {
+        let _ = PROFILE.set(profile);
+        tracing::info!(
+            profile = profile.name,
+            "Matched all six controller hook signatures"
+        );
 
-		for (i, target) in TARGETS.iter().enumerate() {
-			if HOOKS[i].get().is_some() {
-				continue;
-			}
+        for (i, (name, rva, prefix)) in profile.signatures().take(INPUT_CHECKS.len()).enumerate() {
+            let address = base + rva;
+            if !matches_prefix(address, prefix) {
+                tracing::warn!("Couldn't hook {name}: prologue changed at RVA {rva:#x}");
+                continue;
+            }
+            let target = mem::transmute::<usize, InputCheck>(address);
+            match GenericDetour::new(target, INPUT_FNS[i]) {
+                Ok(detour) => {
+                    let detour = INPUT_HOOKS[i].get_or_init(|| detour);
+                    if let Err(err) = detour.enable() {
+                        tracing::warn!("Couldn't enable {name} hook: {err}");
+                    }
+                }
+                Err(err) => tracing::warn!("Couldn't create {name} hook: {err}"),
+            }
+        }
 
-			let addr = base + target.rva;
-
-			let bytes = std::slice::from_raw_parts(addr as *const u8, target.prefix.len());
-			if bytes != target.prefix {
-				let expected: String = target.prefix.iter().map(|b| format!("{b:#02x}")).collect();
-				let found: String = bytes.iter().map(|b| format!("{b:#02x}")).collect();
-				tracing::warn!(
-					"Couldn't hook {}: prologue mismatch at rva {:#x}: Expected 0x{expected}, found 0x{found}",
-					target.name, target.rva,
-				);
-				continue;
-			}
-
-			let target_fn: GenericHookFn = mem::transmute::<usize, GenericHookFn>(addr);
-			let detour = match GenericDetour::<GenericHookFn>::new(target_fn, HOOK_FNS[i]) {
-				Ok(detour) => detour,
-				Err(err) => {
-					tracing::warn!("Couldn't hook {}: create failed: {err}", target.name);
-					continue;
-				}
-			};
-
-			let _ = HOOKS[i].set(detour);
-
-			match HOOKS[i].get().unwrap().enable() {
-				Ok(()) => tracing::info!("{} hooked", target.name),
-				Err(e) => tracing::warn!("{}: enable failed: {e}", target.name),
-			}
-		}
-	}
+        let address = base + profile.hud;
+        if !matches_prefix(address, HUD_UPDATE_PREFIX) {
+            tracing::warn!(
+                "Equipment HUD update prologue mismatch; controller wheels use native input"
+            );
+            return;
+        }
+        let target = mem::transmute::<usize, HudUpdate>(address);
+        match GenericDetour::new(target, hud_update as HudUpdate) {
+            Ok(detour) => {
+                let detour = HUD_HOOK.get_or_init(|| detour);
+                if let Err(err) = detour.enable() {
+                    tracing::warn!("Couldn't enable equipment HUD hook: {err}");
+                }
+            }
+            Err(err) => tracing::warn!("Couldn't create equipment HUD hook: {err}"),
+        }
+        tracing::info!(
+            spells = controller_hooks_ready(Wheel::Spells),
+            quick_items = controller_hooks_ready(Wheel::QuickItems),
+            "Controller switch hooks ready",
+        );
+    }
 }
 
 pub fn uninstall_io_hooks() {
-	unsafe {
-		for h in HOOKS.iter().filter_map(|h| h.get()) {
-			let _ = h.disable();
-		}
-	}
+    unsafe {
+        if let Some(hook) = HUD_HOOK.get() {
+            let _ = hook.disable();
+        }
+        for hook in INPUT_HOOKS.iter().filter_map(OnceLock::get) {
+            let _ = hook.disable();
+        }
+    }
 }

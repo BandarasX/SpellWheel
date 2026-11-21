@@ -99,6 +99,16 @@ pub fn spell_ids(equip_magic_data: *const c_void) -> Option<Vec<(usize, u32)>> {
     )
 }
 
+pub fn selected_slot(equip_magic_data: *const c_void, vanilla_slot: i32) -> Option<i32> {
+    let Some(api) = api() else { return Some(vanilla_slot) };
+    let Some(layout) = active_layout(api).ok()? else { return Some(vanilla_slot) };
+    let offset = layout.selected_spell_index_offset as usize;
+    if offset + size_of::<i32>() > layout.equip_magic_data_size as usize {
+        return None;
+    }
+    Some(unsafe { equip_magic_data.cast::<u8>().add(offset).cast::<i32>().read_unaligned() })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectionResult {
     Unavailable,

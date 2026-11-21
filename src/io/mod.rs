@@ -1,11 +1,9 @@
 use crate::debugging::{add_to_screen_debug, is_debugging};
-use crate::gamepad::set_last_open_is_controller;
-use crate::io::bindings::{set_spell_bindings, Bindings, set_item_bindings, PhysicalKeys};
+use crate::io::bindings::{Bindings, get_item_bindings, get_spell_bindings, set_item_bindings, set_spell_bindings};
 use crate::keyboard::KEYS;
 use crate::rendering::wheel_renderer::WheelType;
 use crate::settings::Settings;
 use crate::{in_menus, keyboard};
-use bindings::BindingEntry;
 use eldenring::cs::{CSInGamePad, UserInputKey};
 use eldenring::fd4::FD4PadManager;
 use fromsoftware_shared::FromStatic;
@@ -18,35 +16,36 @@ use windows::Win32::UI::Input::KeyboardAndMouse::VK_0;
 use crate::keyboard::listener::{static_listener, Listener};
 
 pub mod bindings;
+pub(crate) mod controller;
+pub(crate) mod controller_state;
 pub mod hook;
+mod hook_profiles;
+pub(crate) mod selection_sound;
 
 lazy_static!(
 	static ref PREV_KEY_SPELLS: Mutex<Option<String>> = Mutex::new(None);
 	static ref PREV_KEY_QUICK_ITEMS: Mutex<Option<String>> = Mutex::new(None);
 );
 
-pub fn selected_wheel_type() -> WheelType {
+pub fn wheel_inputs(settings: &Settings) -> (WheelType, [u32; 2]) {
+    if in_menus() || crate::settings::display_settings::display_settings_open() {
+        return (WheelType::None, [get_spell_bindings().pad, get_item_bindings().pad]);
+    }
 	let pad = unsafe { FD4PadManager::instance().ok()
 		.and_then(FD4PadManager::get_in_game_pad) };
-	io_selected_wheel_type(pad)
+	wheel_inputs_from_pad(pad, settings)
 }
 
-pub fn io_selected_wheel_type(pad: Option<&CSInGamePad>) -> WheelType {
-	if crate::settings::display_settings::display_settings_open() { return WheelType::None; }
-	if in_menus() {
-		if is_debugging() {
-			add_to_screen_debug("Player in menus".to_string());
-		}
-		return WheelType::None;
-	}
-
-	let settings = Settings::read_or_default();
+fn wheel_inputs_from_pad(pad: Option<&CSInGamePad>, settings: &Settings) -> (WheelType, [u32; 2]) {
+    let mut controller_bindings = [0; 2];
 
 	if let Some(pad) = pad.as_ref() {
 		let bindings = Bindings::from_pad(pad);
 
-		let switch_spell = bindings.get_input_bindings(pad, &UserInputKey::SwitchSpell);
-		let switch_item = bindings.get_input_bindings(pad, &UserInputKey::SwitchItem);
+		let mut switch_spell = bindings.get_input_bindings(pad, &UserInputKey::SwitchSpell);
+		let mut switch_item = bindings.get_input_bindings(pad, &UserInputKey::SwitchItem);
+		switch_spell.pad |= bindings.get_input_bindings(pad, &UserInputKey::SwitchSpell2).pad;
+		switch_item.pad |= bindings.get_input_bindings(pad, &UserInputKey::SwitchItem2).pad;
 		if static_listener("entries".to_string(), || Listener::Released { keys: Box::new([VK_0.0 as i32]) }).is_active() {
 			let switch_spell = bindings.get_input_bindings_dbg(pad, &UserInputKey::SwitchSpell);
 			let switch_item = bindings.get_input_bindings_dbg(pad, &UserInputKey::SwitchItem);
@@ -57,8 +56,8 @@ pub fn io_selected_wheel_type(pad: Option<&CSInGamePad>) -> WheelType {
 			tracing::info!("Switch spell keys2: {switch_spell2:?}");
 			tracing::info!("Switch item keys2: {switch_item2:?}");
 		}
-		let spell_status = switch_spell.pressed_status(None);
-		let item_status = switch_item.pressed_status(None);
+		let spell_status = switch_spell.keyboard_mouse_status();
+		let item_status = switch_item.keyboard_mouse_status();
 		if is_debugging() {
 			add_to_screen_debug(format!("Switch spell inputs: {switch_spell:?}"));
 			add_to_screen_debug(format!("  Pressed status: {spell_status:?}"));
@@ -68,28 +67,18 @@ pub fn io_selected_wheel_type(pad: Option<&CSInGamePad>) -> WheelType {
 		set_spell_bindings(switch_spell);
 		set_item_bindings(switch_item);
 
-		if settings.spell_wheel_enabled {
-			if (spell_status.key() || spell_status.mouse()) && settings.spells_key.to_lowercase() == "ingame" {
-				set_last_open_is_controller(false);
-				return WheelType::Spells;
-			}
-			if spell_status.pad() {
-				set_last_open_is_controller(true);
-				return WheelType::Spells;
-			}
-		}
-
-		if settings.item_wheel_enabled {
-			if (item_status.key() || item_status.mouse()) && settings.quick_items_key.to_lowercase() == "ingame" {
-				set_last_open_is_controller(false);
-				return WheelType::QuickItems;
-			}
-			if item_status.pad() {
-				set_last_open_is_controller(true);
-				return WheelType::QuickItems;
-			}
-		}
-	}
+        controller_bindings = [switch_spell.pad, switch_item.pad];
+        if settings.spell_wheel_enabled && (spell_status.key() || spell_status.mouse())
+            && settings.spells_key.eq_ignore_ascii_case("ingame")
+        {
+            return (WheelType::Spells, controller_bindings);
+        }
+        if settings.item_wheel_enabled && (item_status.key() || item_status.mouse())
+            && settings.quick_items_key.eq_ignore_ascii_case("ingame")
+        {
+            return (WheelType::QuickItems, controller_bindings);
+        }
+    }
 
 	let spells = (
 		WheelType::Spells, settings.spell_wheel_enabled,
@@ -107,12 +96,11 @@ pub fn io_selected_wheel_type(pad: Option<&CSInGamePad>) -> WheelType {
 			continue;
 		}
 		if let Some(value) = is_wheel_open_key_pressed(wheel_type, prev_key, key, &raw_key_default) {
-			set_last_open_is_controller(false);
-			return value;
+			return (value, controller_bindings);
 		}
 	}
 
-	WheelType::None
+	(WheelType::None, controller_bindings)
 }
 
 fn is_wheel_open_key_pressed(wheel_type: WheelType, prev_key: LockResult<MutexGuard<Option<String>>>, key: String, raw_key_default: &VIRTUAL_KEY) -> Option<WheelType> {

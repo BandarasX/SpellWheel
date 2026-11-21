@@ -1,5 +1,4 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
 use lazy_static::lazy_static;
 use retour::static_detour;
 use windows::core::s;
@@ -13,12 +12,7 @@ use crate::settings::Settings;
 lazy_static!(
     static ref HOOKED: AtomicBool = AtomicBool::new(false);
     static ref SUPPRESS_CAMERA: AtomicBool = AtomicBool::new(false);
-    static ref HOOKED_STATE: Arc<RwLock<XINPUT_STATE>> = Arc::new(RwLock::default());
 );
-
-pub fn get_xinput_gamepad_state() -> XINPUT_GAMEPAD {
-    HOOKED_STATE.read().expect("Couldn't read HOOKED_STATE").Gamepad
-}
 
 pub fn set_suppress_camera(suppress_camera: bool) {
     SUPPRESS_CAMERA.store(suppress_camera, Ordering::Relaxed);
@@ -35,20 +29,25 @@ fn hooked_xinput_get_state(
     unsafe {
         let result = XInputHook.call(user_index, state);
 
-        if state.is_null() || result != 0 { return result; }
-        *HOOKED_STATE.write().expect("Couldn't write to HOOKED_STATE") = *state;
+        let controller_wheel = user_index == 0 && {
+            let sample = (result == 0 && !state.is_null()).then(|| (*state).Gamepad.into());
+            crate::io::controller::record_sample(sample)
+        };
+        if state.is_null() || result != 0 {
+            return result;
+        }
 
         if crate::settings::display_settings::display_settings_open() {
             (*state).Gamepad = XINPUT_GAMEPAD::default();
             return result;
         }
 
-        let suppress_camera = SUPPRESS_CAMERA.load(Ordering::Relaxed);
+        let suppress_camera = controller_wheel || SUPPRESS_CAMERA.load(Ordering::Relaxed);
         if is_debugging() {
             add_to_screen_debug(format!("Camera suppressed? = {suppress_camera}"));
             add_to_screen_debug(format!("Original state: {:?}", (*state).Gamepad));
         }
-        if suppress_camera && !state.is_null() {
+        if suppress_camera && user_index == 0 {
             (*state).Gamepad.sThumbRX = 0;
             (*state).Gamepad.sThumbRY = 0;
         }

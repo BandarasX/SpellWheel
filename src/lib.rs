@@ -22,18 +22,18 @@ pub mod glyphs;
 
 use crate::await_seamless::{await_seamless, is_seamless_coop_active};
 use crate::debugging::{add_to_screen_debug, commit_screen_debug, is_debugging, run_every, run_once};
-use crate::gamepad::{GamepadState, set_gamepad_state, update_gamepad_state};
+use crate::io::controller;
+use crate::io::controller_state::{Slot, Wheel};
 use crate::glyphs::font_manager::FontManager;
 use crate::icons::icon_manager::IconManager;
 use crate::rendering::{remove_hudhook, try_init_rendering};
-use eldenring::cs::{CSFeManHudState, CSFeManImp, CSMenuManImp, CSTaskGroupIndex, CSTaskImp, GameDataMan, Magic, SoloParam, SoloParamRepository, WorldChrManDbg};
+use eldenring::cs::{CSFeManHudState, CSFeManImp, CSMenuManImp, CSTaskGroupIndex, CSTaskImp, EquipGameData, GameDataMan, Magic, SoloParam, SoloParamRepository, WorldChrManDbg};
 use eldenring::fd4::FD4TaskData;
 use eldenring::util::system::wait_for_system_init;
 use fromsoftware_shared::{FromStatic, Program, SharedTaskImpExt};
 use hudhook::hooks::dx12::get_hwnd;
 use hudhook::windows::Win32::System::SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH};
 use io::hook::{install_io_hooks, uninstall_io_hooks};
-use io::selected_wheel_type;
 use lazy_static::lazy_static;
 use rendering::render_hook::ItemWheelData;
 use rendering::wheel_renderer::WheelType;
@@ -41,7 +41,7 @@ use std::fs::File;
 use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing_subscriber::fmt;
 #[cfg(feature = "extra-memory-slots-support")]
 use crate::expanded_memory_slots::SelectionResult;
@@ -117,7 +117,6 @@ fn deinit() {
 }
 
 lazy_static!(
-    pub static ref PROGRAM_START: Instant = Instant::now();
     static ref TICK: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 );
 
@@ -170,11 +169,6 @@ fn start() {
 
     tracing::info!("Init complete");
     let tasks = unsafe { CSTaskImp::instance() }.expect("Could not get CSTaskImp");
-    tracing::info!("Creating gamepad state");
-    let gamepad_state = Arc::new(Mutex::new(GamepadState::new()));
-    if set_gamepad_state(gamepad_state).is_err() {
-        tracing::error!("GAMEPAD_STATE should not be set before start");
-    }
     tracing::info!("Running task");
     tasks.run_recurring(
         tick,
@@ -229,6 +223,44 @@ lazy_static!(
     static ref PREV_WHEEL_TYPE: Arc<Mutex<WheelType>> = Arc::new(Mutex::new(WheelType::None));
     static ref PREV_DISPLAY_SETTINGS_OPEN: AtomicBool = AtomicBool::new(false);
 );
+fn select_spell(equipment: &mut EquipGameData, index: i32) -> bool {
+    let magic = &mut equipment.equip_magic_data;
+    #[cfg(feature = "extra-memory-slots-support")]
+    match expanded_memory_slots::select_spell(magic.as_ptr().cast(), index) {
+        SelectionResult::Applied => return true,
+        SelectionResult::Rejected => {
+            tracing::warn!("Expanded Memory Slots rejected spell index {index}");
+            return false;
+        }
+        SelectionResult::Unavailable => {}
+    }
+    magic.selected_slot = index;
+    true
+}
+
+fn active_slot(equipment: &EquipGameData, wheel: Wheel, slots: &[(usize, u32)]) -> Option<Slot> {
+    let index = match wheel {
+        Wheel::Spells => {
+            let magic = &equipment.equip_magic_data;
+            #[cfg(feature = "extra-memory-slots-support")]
+            let index = expanded_memory_slots::selected_slot(magic.as_ptr().cast(), magic.selected_slot)?;
+            #[cfg(not(feature = "extra-memory-slots-support"))]
+            let index = magic.selected_slot;
+            index
+        }
+        Wheel::QuickItems => equipment.equip_item_data.selected_quick_slot,
+    };
+    slots.iter().find(|(slot, _)| *slot == index as usize)
+        .map(|&(_, param_id)| Slot { index, param_id })
+}
+
+fn interrupt_gameplay() {
+    controller::interrupt();
+    set_suppress_camera(false);
+    SELECTED_SPELL_INDEX.store(-1, Ordering::Relaxed);
+    SELECTED_QUICK_ITEM_INDEX.store(-1, Ordering::Relaxed);
+}
+
 fn tick(_fd4: &FD4TaskData) {
     guard!(
         run_once!("entered tick function" => {
@@ -240,27 +272,33 @@ fn tick(_fd4: &FD4TaskData) {
             });
         }
         let Some(world_chr_man_dbg) = unsafe { WorldChrManDbg::instance() }.ok() else {
+            interrupt_gameplay();
             return;
         };
 
         let Some(fe_man) = unsafe { CSFeManImp::instance() }.ok() else {
+            interrupt_gameplay();
             return;
         };
         set_in_menus(world_chr_man_dbg, fe_man);
 
         let Some(game_data_man) = unsafe { GameDataMan::instance_mut() }.ok() else {
+            interrupt_gameplay();
             return;
         };
 
         let Some(param_repo) = unsafe { SoloParamRepository::instance_mut() }.ok() else {
+            interrupt_gameplay();
             return;
         };
 
         let Some(menu_man) = unsafe { CSMenuManImp::instance_mut() }.ok() else {
+            interrupt_gameplay();
             return;
         };
 
         if param_repo.solo_param_holders[Magic::INDEX as usize].get_res_cap(0).is_none() {
+            interrupt_gameplay();
             return;
         }
         run_once!("passed all checks" => {
@@ -276,42 +314,20 @@ fn tick(_fd4: &FD4TaskData) {
             install_xinput_hook();
         }
         install_keyboard_and_mouse_hooks();
-        update_gamepad_state();
         try_init_rendering();
         tick_listeners();
         install_io_hooks();
 
-        let selected_spell_index = SELECTED_SPELL_INDEX.load(Ordering::Relaxed);
-        if selected_spell_index != -1 {
-            let equip_magic_data = &mut game_data_man
-                .main_player_game_data
-                .equipment
-                .equip_magic_data;
-            #[cfg(feature = "extra-memory-slots-support")]
-            match expanded_memory_slots::select_spell(
-                equip_magic_data.as_ptr().cast(),
-                selected_spell_index,
-            ) {
-                SelectionResult::Applied => {}
-                SelectionResult::Unavailable => {
-                    equip_magic_data.selected_slot = selected_spell_index;
-                }
-                SelectionResult::Rejected => {
-                    tracing::warn!(
-                        "Expanded Memory Slots rejected spell index {selected_spell_index}"
-                    );
-                }
+        let selected_spell_index = SELECTED_SPELL_INDEX.swap(-1, Ordering::Relaxed);
+        let selected_quick_item_index = SELECTED_QUICK_ITEM_INDEX.swap(-1, Ordering::Relaxed);
+        let equipment = &mut game_data_man.main_player_game_data.equipment;
+        if !display_settings_open() && !in_menus() {
+            if selected_spell_index != -1 {
+                select_spell(equipment, selected_spell_index);
             }
-            #[cfg(not(feature = "extra-memory-slots-support"))]
-            {
-                equip_magic_data.selected_slot = selected_spell_index;
+            if selected_quick_item_index != -1 {
+                equipment.equip_item_data.selected_quick_slot = selected_quick_item_index;
             }
-            SELECTED_SPELL_INDEX.store(-1, Ordering::Relaxed);
-        }
-        let selected_quick_item_index = SELECTED_QUICK_ITEM_INDEX.load(Ordering::Relaxed);
-        if selected_quick_item_index != -1 {
-            game_data_man.main_player_game_data.equipment.equip_item_data.selected_quick_slot = selected_quick_item_index;
-            SELECTED_QUICK_ITEM_INDEX.store(-1, Ordering::Relaxed);
         }
 
         #[cfg(feature = "extra-memory-slots-support")]
@@ -320,10 +336,7 @@ fn tick(_fd4: &FD4TaskData) {
         let mut equipped_spells = Vec::with_capacity(14);
         let mut equipped_quick_items = Vec::with_capacity(10);
 
-        let equip_magic_data = &game_data_man
-            .main_player_game_data
-            .equipment
-            .equip_magic_data;
+        let equip_magic_data = &equipment.equip_magic_data;
         #[cfg(feature = "extra-memory-slots-support")]
         let spell_data = expanded_memory_slots::spell_ids(equip_magic_data.as_ptr().cast())
             .unwrap_or_else(|| equip_magic_data
@@ -342,8 +355,7 @@ fn tick(_fd4: &FD4TaskData) {
                 .enumerate()
                 .filter(|(_idx, id)| *id != !0)
                 .collect();
-        let quick_item_data: Vec<_> = game_data_man.main_player_game_data
-            .equipment
+        let quick_item_data: Vec<_> = equipment
             .equipment_entries
             .quick_tems
             .iter()
@@ -351,6 +363,37 @@ fn tick(_fd4: &FD4TaskData) {
             .filter_map(|(idx, entry)| entry.param_id().map(|param_id| (idx, param_id)))
             .filter(|(_idx, id)| *id != !0)
             .collect();
+
+        let (keyboard_wheel, controller_bindings) = io::wheel_inputs(&settings);
+        let (controller_wheel, close_sound) = controller::update_wheel(
+            &settings, controller_bindings, keyboard_wheel != WheelType::None,
+            |wheel, requested| {
+                let slots = match wheel {
+                    Wheel::Spells => &spell_data,
+                    Wheel::QuickItems => &quick_item_data,
+                };
+                if let Some(slot) = requested {
+                    if !slots.contains(&(slot.index as usize, slot.param_id)) {
+                        return None;
+                    }
+                    match wheel {
+                        Wheel::Spells if !select_spell(equipment, slot.index) => return None,
+                        Wheel::QuickItems => equipment.equip_item_data.selected_quick_slot = slot.index,
+                        Wheel::Spells => {}
+                    }
+                }
+                active_slot(equipment, wheel, slots)
+            },
+        );
+        if let Some(wheel) = close_sound
+            && !display_settings_open() && io::is_game_focused()
+        {
+            if settings.debugging {
+                tracing::info!(?wheel, "Controller wheel closed with a changed active slot");
+            }
+            io::selection_sound::play(wheel);
+        }
+        let selected_wheel_type = controller_wheel.map_or(keyboard_wheel, |visible| visible.wheel.into());
 
         for (equipped, data) in [
             (&mut equipped_spells, spell_data), (&mut equipped_quick_items, quick_item_data)
@@ -377,11 +420,6 @@ fn tick(_fd4: &FD4TaskData) {
             });
         }
 
-        ItemWheelData::mutate(|data| {
-            data.spells = equipped_spells;
-            data.quick_items = equipped_quick_items;
-        });
-        let selected_wheel_type = selected_wheel_type();
         let display_settings_open = display_settings_open();
 
         let wheel_changed = *PREV_WHEEL_TYPE.lock().expect("Couldn't get PREV_WHEEL_TYPE") != selected_wheel_type;
@@ -390,12 +428,15 @@ fn tick(_fd4: &FD4TaskData) {
         if wheel_changed || display_settings_changed {
             let is_ui_open = (selected_wheel_type != WheelType::None) || display_settings_open;
             menu_man.disable_mouse_cursor = !is_ui_open;
-            set_suppress_camera(is_ui_open);
         }
+        set_suppress_camera(controller_wheel.is_none() && selected_wheel_type != WheelType::None);
         *PREV_WHEEL_TYPE.lock().expect("Couldn't get PREV_WHEEL_TYPE") = selected_wheel_type;
         PREV_DISPLAY_SETTINGS_OPEN.store(display_settings_open, Ordering::Relaxed);
         ItemWheelData::mutate(|data| {
+            data.spells = equipped_spells;
+            data.quick_items = equipped_quick_items;
             data.wheel_type = selected_wheel_type;
+            data.controller_wheel = controller_wheel;
         });
 
         commit_screen_debug();

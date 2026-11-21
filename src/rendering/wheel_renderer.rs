@@ -1,5 +1,5 @@
-use crate::debugging::{add_to_screen_debug, is_debugging};
-use crate::gamepad::{gamepad_state, using_controller};
+use crate::gamepad::RightStick;
+use crate::io::controller_state::{Slot, Wheel, retains_highlight};
 use crate::hwindow::get_window_size;
 use crate::icons::icon_manager::IconManager;
 use crate::mouse::get_mouse_state;
@@ -45,18 +45,19 @@ impl Selection {
     }
 }
 
-pub fn angle_and_dist_sqr(cursor_pos: [f32; 2], controller_pos: [f32; 2]) -> Selection {
-    let [ww, wh] = get_window_size();
-    if using_controller() {
-        let [dx, dy] = [controller_pos[0], -controller_pos[1]];
+fn angle_and_dist_sqr(controller_pos: Option<RightStick>) -> Selection {
+    if let Some([x, y]) = controller_pos {
+        let [dx, dy] = [x, -y];
         let angle = dy.atan2(dx);
-        let dist_sqr = controller_pos[0] * controller_pos[0] + controller_pos[1] * controller_pos[1];
+        let dist_sqr = x * x + y * y;
         Selection::Controller {
             angle,
             dist_sqr,
         }
     } else {
-        let [dx, dy] = [cursor_pos[0] - ww / 2.0, cursor_pos[1] - wh / 2.0];
+        let [ww, wh] = get_window_size();
+        let [x, y] = get_mouse_state().mouse_pos();
+        let [dx, dy] = [x - ww / 2.0, y - wh / 2.0];
         let angle = dy.atan2(dx);
         let dist_sqr = dx * dx + dy * dy;
         Selection::Cursor {
@@ -252,45 +253,52 @@ pub fn render_selector(settings: &Settings, items: &[DisplayItem], ww: f32, wh: 
     }
 }
 
-pub fn render_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool) {
-    draw_wheel(items, ui, draw_list, true, controller_style);
+pub fn render_wheel(
+    items: &mut [DisplayItem],
+    ui: &Ui,
+    draw_list: &DrawListMut,
+    stick: Option<RightStick>,
+    controller_highlight: Option<Slot>,
+) -> Option<Slot> {
+    let selection = angle_and_dist_sqr(stick);
+    let mut selector_angle = selection.angle();
+
+    let can_select = selection.can_select();
+    let previous = controller_highlight.and_then(|slot| items.iter().position(|item| item.slot == slot));
+    let selected = if can_select {
+        previous.filter(|&index| stick.is_some() && retains_highlight(selector_angle, items[index].angle, items.len()))
+            .or_else(|| closest_item_to(items, selector_angle))
+    } else {
+        previous
+    };
+
+    if can_select || stick.is_some() {
+        for (index, item) in items.iter_mut().enumerate() {
+            item.is_highlighted = selected == Some(index);
+        }
+    }
+    if stick.is_some() && let Some(index) = selected {
+        selector_angle = items[index].angle;
+    }
+
+    draw_wheel(items, ui, draw_list, stick.is_some(), selector_angle, can_select);
+    selected.map(|index| items[index].slot)
 }
 
 /// Draw the wheel behind settings with selection frozen.
 pub fn render_wheel_preview(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool) {
-    draw_wheel(items, ui, draw_list, false, controller_style);
+    draw_wheel(items, ui, draw_list, controller_style, 0.0, false);
 }
 
-fn draw_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, interactive: bool, controller_style: bool) {
+fn draw_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool, selector_angle: f32, can_select: bool) {
     draw_debug(ui, draw_list);
     if items.is_empty() {
         return;
     }
     let settings = Settings::read_or_default();
-
-    let selection = if interactive { angle_and_dist_sqr(get_mouse_state().mouse_pos(), gamepad_state().right_stick) }
-        else { Selection::Cursor { angle: items.iter().find(|i| i.is_highlighted).map_or(0.0, |i| i.angle), dist_sqr: 0.0 } };
-
     let [ww, wh] = get_window_size();
-
-    // Only select closest IF far enough away from the center
-    let can_select = interactive && selection.can_select();
-    if can_select {
-        for item in items.iter_mut() {
-            item.is_highlighted = false;
-        }
-        if let Some(closest_idx) = closest_item_to(items, selection.angle()) {
-            if is_debugging() {
-                add_to_screen_debug(format!("Closest item index: {closest_idx}"))
-            }
-            items[closest_idx].is_highlighted = true;
-        } else if is_debugging() {
-            add_to_screen_debug("No item highlighted, but within range.".to_string());
-        }
-    }
-
     let img_dim = DisplayItem::img_dim();
-    render_selector(&settings, items, ww, wh, img_dim, draw_list, selection.angle(), can_select, controller_style);
+    render_selector(&settings, items, ww, wh, img_dim, draw_list, selector_angle, can_select, controller_style);
 
     let show_inner_ring = controller_style || settings.keyboard_mouse_inner_ring;
     let num_items = items.len();
@@ -305,4 +313,13 @@ pub enum WheelType {
     Spells,
     QuickItems,
     None
+}
+
+impl From<Wheel> for WheelType {
+    fn from(wheel: Wheel) -> Self {
+        match wheel {
+            Wheel::Spells => Self::Spells,
+            Wheel::QuickItems => Self::QuickItems,
+        }
+    }
 }

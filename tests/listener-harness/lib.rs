@@ -311,3 +311,11 @@ mod display_settings {
         include!("panel_ui_tests.rs");
     }
 }
+
+#[cfg(test)]
+#[path = "../../src/io/controller_state.rs"]
+mod controller_state;
+
+#[cfg(test)]
+#[path = "../../src/io/hook_profiles.rs"]
+mod hook_profiles;
