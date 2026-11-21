@@ -2,7 +2,9 @@
 
 The user accepted all in-game checks for candidate `c1c27699566313d2b5d93bda8f0d3ac760da5579` on Elden Ring App Ver. **1.17.2** / Calibrations Ver. **1.17.3**, then approved updating GitHub and publishing. The accepted Windows x64/MSVC candidate was cross-built with locked dependencies and Rust nightly-2026-11-13. Its DLL SHA-256 is `d2cd3d90077986f5aab3faf3bef1ca5f02dce5ef8928a6c8e000ff3cd8f744df`.
 
-Release packaging and documentation follow the accepted source. The Windows release workflow reruns the controller, panel/listener and diagnostic transport suites before building and publishing. The GitHub release's build provenance identifies the release source, Windows Actions run and release DLL hash. The native Actions DLL is a separate build. [GitHub releases](https://github.com/BandarasX/SpellWheel/releases)
+Published as [controller-input-2d12dd2](https://github.com/BandarasX/SpellWheel/releases/tag/controller-input-2d12dd2) from source commit `2d12dd263095ec1d99fe547fd4b84d26c3f538f1`. The runtime source, dependencies, assets and tests match the accepted candidate. The native Windows x64/MSVC workflow passed 60 controller and panel/listener tests and 3 diagnostic transport tests before building and publishing the default-feature DLL. [Windows Actions run](https://github.com/BandarasX/SpellWheel/actions/runs/44939681257)
+
+The public DLL is a separate build. Its SHA-256 is `592759619624097aab7d3425826729ea976a6c57181488c35d19635fe8c76d82` and its size is 7,821,824 bytes. All five public assets were downloaded. The tag, provenance, published checksums, AMD64 PE32+ header, and byte equality of the ZIP and standalone DLL were verified. The ZIP SHA-256 is `313fb2a023c12d6aaea0ac80c1862c6ebe96a9ead447193e89b4cf1c5bb850be`. [Build provenance](https://github.com/BandarasX/SpellWheel/releases/download/controller-input-2d12dd2/build-provenance.json) · [Release checksums](https://github.com/BandarasX/SpellWheel/releases/download/controller-input-2d12dd2/SHA256SUMS.txt)
 
 ## Acceptance and implementation
 
