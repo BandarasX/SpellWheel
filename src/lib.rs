@@ -7,6 +7,8 @@ mod debugging;
 mod keyboard;
 mod icons;
 mod settings;
+mod wheel_details;
+mod wheel_details_data;
 pub mod items;
 pub mod paths;
 pub mod gamepad;
@@ -49,6 +51,7 @@ use crate::items::Item;
 use crate::keyboard::hook::{install_keyboard_and_mouse_hooks, reset_scroll};
 use crate::settings::Settings;
 use crate::settings::display_settings::display_settings_open;
+use crate::wheel_details_data::{WheelDetailsData, details_enabled};
 use crate::xinput_hook::{install_xinput_hook, remove_xinput_hook, set_suppress_camera};
 use keyboard::listener::tick_listeners;
 
@@ -256,6 +259,7 @@ fn active_slot(equipment: &EquipGameData, wheel: Wheel, slots: &[(usize, u32)]) 
 
 fn interrupt_gameplay() {
     controller::interrupt();
+    ItemWheelData::mutate(|data| data.details = WheelDetailsData::default());
     set_suppress_camera(false);
     SELECTED_SPELL_INDEX.store(-1, Ordering::Relaxed);
     SELECTED_QUICK_ITEM_INDEX.store(-1, Ordering::Relaxed);
@@ -320,7 +324,9 @@ fn tick(_fd4: &FD4TaskData) {
 
         let selected_spell_index = SELECTED_SPELL_INDEX.swap(-1, Ordering::Relaxed);
         let selected_quick_item_index = SELECTED_QUICK_ITEM_INDEX.swap(-1, Ordering::Relaxed);
-        let equipment = &mut game_data_man.main_player_game_data.equipment;
+        let player_data = &mut *game_data_man.main_player_game_data;
+        let player_data_ptr = std::ptr::NonNull::from(&*player_data);
+        let equipment = &mut player_data.equipment;
         if !display_settings_open() && !in_menus() {
             if selected_spell_index != -1 {
                 select_spell(equipment, selected_spell_index);
@@ -395,6 +401,35 @@ fn tick(_fd4: &FD4TaskData) {
         }
         let selected_wheel_type = controller_wheel.map_or(keyboard_wheel, |visible| visible.wheel.into());
 
+        let preview_open = display_settings_open();
+        let mut details = WheelDetailsData::default();
+        let read_spells = details_enabled(&settings, WheelType::Spells)
+            && (selected_wheel_type == WheelType::Spells || preview_open);
+        let read_items = details_enabled(&settings, WheelType::QuickItems)
+            && (selected_wheel_type == WheelType::QuickItems || preview_open);
+        if (read_spells || read_items)
+            && !in_menus()
+            && let Ok(world) = unsafe { eldenring::cs::WorldChrMan::instance() }
+            && let Some(player) = world.main_player.as_ref()
+            && player.player_game_data == player_data_ptr
+        {
+            details.player_context = Some(player_data_ptr.as_ptr() as usize);
+            if read_spells {
+                details.active_spell = active_slot(equipment, Wheel::Spells, &spell_data);
+                let stats = [
+                    player_data.effective_intelligence,
+                    player_data.effective_faith,
+                    player_data.effective_arcane,
+                ]
+                .map(|value| (value > 0).then_some(value));
+                details.read_spells(param_repo, &spell_data, stats, &settings);
+            }
+            if read_items {
+                details.active_item = active_slot(equipment, Wheel::QuickItems, &quick_item_data);
+                details.read_quick_items(param_repo, equipment, &quick_item_data, &settings);
+            }
+        }
+
         for (equipped, data) in [
             (&mut equipped_spells, spell_data), (&mut equipped_quick_items, quick_item_data)
         ] {
@@ -421,7 +456,6 @@ fn tick(_fd4: &FD4TaskData) {
         }
 
         let display_settings_open = display_settings_open();
-
         let wheel_changed = *PREV_WHEEL_TYPE.lock().expect("Couldn't get PREV_WHEEL_TYPE") != selected_wheel_type;
         let display_settings_changed = PREV_DISPLAY_SETTINGS_OPEN.load(Ordering::Relaxed) != display_settings_open;
 
@@ -437,6 +471,7 @@ fn tick(_fd4: &FD4TaskData) {
             data.quick_items = equipped_quick_items;
             data.wheel_type = selected_wheel_type;
             data.controller_wheel = controller_wheel;
+            data.details = details;
         });
 
         commit_screen_debug();

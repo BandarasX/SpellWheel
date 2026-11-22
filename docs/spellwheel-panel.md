@@ -14,7 +14,7 @@ The overlay **does not pause the game**. Keyboard/mouse navigation is implemente
 
 ## Preview, reload and persistence
 
-Only the managed Appearance/HDR fields preview in memory. The preview opens and closes with the panel. It keeps the wheel and input style already visible on opening. Otherwise it shows the quick-item wheel with the controller-style ring, falling back to spells when there are no quick items. Selection stays frozen. Layout changes rebuild existing wheel geometry/text wrapping as needed. HDR changes use existing shader constants, including brightness and saturation, without recreating DX12 resources per edit. HDR appearance requires a real supported HDR output; the panel does not simulate HDR or change screen mode, ERSS, FG or other mods.
+Appearance, HDR, and Wheel details settings preview in memory. The preview opens and closes with the panel. It keeps the wheel and input style already visible on opening. Otherwise it shows the quick-item wheel with the controller-style ring, falling back to spells when there are no quick items. Selection stays frozen. Layout changes rebuild existing wheel geometry/text wrapping as needed. HDR changes use existing shader constants, including brightness and saturation, without recreating DX12 resources per edit. HDR appearance requires a real supported HDR output; the panel does not simulate HDR or change screen mode, ERSS, FG or other mods.
 
 Invalid text retains the last valid preview. Periodic disk refresh is suspended while the panel is open. The draft separately watches disk changes; no external edit replaces a draft automatically, even when clean. Save rechecks the disk baseline. If changed, choose explicit **Overwrite disk**, **Reload disk (discard draft)**, or **Keep editing**. Reload disk is a read, never a Save. An unreadable file retains runtime state and blocks editing/Save until Reload disk succeeds.
 
@@ -37,6 +37,23 @@ A draft binding becomes active only after successful Save (or explicit acceptanc
 Left Alt + F4 has a narrowly scoped native system-key filter to prevent the configured chord from generating Windows close commands. This does not intercept ordinary window-close commands or perform shortcut-conflict detection.
 
 Invalid startup hotkey values, including wrong types, recover **only the binding in memory to Left Shift + F10**, log the reason, and preserve unrelated values and the original file. The panel opens the unchanged invalid document in Advanced for repair. Recovery while the game is closed: back up TOML, correct the two fields above (or remove them for the default), then relaunch. Other invalid startup settings log an error and use compatibility defaults in memory; they are never silently written to disk. Invalid later disk refreshes keep the last valid runtime.
+
+## Wheel details
+
+Open **Interface → Wheel details** to preview the card and change its fields or placement. Omitted keys use these defaults in existing and new TOMLs. Reset Current tab in Interface stages these defaults together with the shortcut defaults.
+
+| Key | Allowed values | Default |
+| --- | --- | --- |
+| `wheel_details_wheels` | `"both"`, `"spell"`, `"item"`, `"off"` | `"both"` |
+| `wheel_details_fp_cost` | `true`, `false` | `true` |
+| `wheel_details_stat_requirements` | `true`, `false` | `true` |
+| `wheel_details_item_quantity` | `true`, `false` | `true` |
+| `wheel_details_availability` | `true`, `false` | `true` |
+| `wheel_details_position` | `"below"`, `"above"` | `"below"` |
+
+The card starts at the active slot of an open wheel and follows accepted highlights, including on-close selection before it commits. It uses the existing name placement and appears only when it has a detail or status. Availability messages can be shown independently of the detail values. Turning them off also hides unmet-stat warnings. Choosing which wheels show the card preserves each field setting.
+
+The card uses spell param rows for normal-cast **Base FP** and INT, FAI, and ARC requirements. The live local player's effective attributes supply specific unmet-stat warnings. Equipped consumables use the count from the associated inventory slot. **None remaining** requires an inventory record with a confirmed zero. A depleted slot may disappear from the game inventory and wheel altogether. Effective casting cost and **Insufficient FP** are unavailable on this candidate. The layout uses the other side if the preferred edge has little space and the other side has more. The card may be omitted when neither edge can fit its contents at a readable size.
 
 ## Project defaults and reset scope
 

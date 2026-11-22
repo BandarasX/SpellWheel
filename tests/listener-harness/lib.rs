@@ -39,6 +39,9 @@ mod keyboard {
 }
 
 mod io {
+    #[cfg(test)]
+    pub(crate) use crate::controller_state;
+
     pub fn is_game_focused() -> bool {
         crate::keyboard::INPUT.load(std::sync::atomic::Ordering::Relaxed) & 4 != 0
     }
@@ -261,6 +264,7 @@ pub mod input_policy;
 #[cfg(test)]
 mod settings {
     pub use crate::{Settings, panel_model};
+    pub use crate::settings_values::{DetailPosition, DetailWheels, ItemNames, Style};
     use std::sync::{LazyLock, Mutex};
     static RUNTIME: LazyLock<Mutex<panel_model::RuntimeSettings>> =
         LazyLock::new(|| Mutex::new(panel_model::RuntimeSettings::new(Settings::default())));
@@ -319,3 +323,33 @@ mod controller_state;
 #[cfg(test)]
 #[path = "../../src/io/hook_profiles.rs"]
 mod hook_profiles;
+
+#[cfg(test)]
+#[path = "../../src/wheel_details.rs"]
+mod wheel_details;
+
+#[cfg(test)]
+mod wheel_details_tests;
+
+#[cfg(test)]
+mod rendering {
+    pub mod display_item {
+        use super::wrapped_text::WrappedText;
+
+        pub struct DisplayItem {
+            pub pos: [f32; 2],
+            pub name: WrappedText,
+        }
+    }
+
+    pub mod wrapped_text {
+        include!("../../src/rendering/wrapped_text.rs");
+    }
+
+    pub mod details_card {
+        include!("../../src/rendering/details_card.rs");
+    }
+}
+
+#[cfg(test)]
+mod details_card_tests;

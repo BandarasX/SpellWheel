@@ -526,6 +526,46 @@ impl DisplaySettings {
             }
             ui.text_wrapped("Becomes active after successful Save and release of the old/new keys. Requires the selected left modifier only. No modifier means no Shift/Ctrl/Alt held.");
         }
+        if self.section(ui, "Wheel details", TreeNodeFlags::DEFAULT_OPEN) {
+            self.choice(
+                ui,
+                "Show details on",
+                "wheel_details_wheels",
+                s.wheel_details_wheels.as_str(),
+                &["both", "spell", "item", "off"],
+                &["Both wheels", "Spell wheel only", "Item wheel only", "Off"],
+            );
+            for (label, key, mut enabled) in [
+                ("FP cost", "wheel_details_fp_cost", s.wheel_details_fp_cost),
+                (
+                    "Stat requirements",
+                    "wheel_details_stat_requirements",
+                    s.wheel_details_stat_requirements,
+                ),
+                (
+                    "Item quantity",
+                    "wheel_details_item_quantity",
+                    s.wheel_details_item_quantity,
+                ),
+                (
+                    "Availability messages",
+                    "wheel_details_availability",
+                    s.wheel_details_availability,
+                ),
+            ] {
+                if ui.checkbox(label, &mut enabled) {
+                    self.set(key, enabled);
+                }
+            }
+            self.choice(
+                ui,
+                "Card position",
+                "wheel_details_position",
+                s.wheel_details_position.as_str(),
+                &["below", "above"],
+                &["Below", "Above"],
+            );
+        }
     }
     fn content(&mut self, ui: &Ui) {
         if self.read_error {

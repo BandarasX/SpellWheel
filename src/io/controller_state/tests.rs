@@ -70,6 +70,28 @@ fn early_release_queues_one_tap_per_press_and_never_opens() {
 }
 
 #[test]
+fn visible_slot_tracks_start_and_candidate_and_drops_closed_generations() {
+    let mut pad = Pad::new();
+    let first = pad.open(Wheel::Spells);
+    assert_eq!(pad.state.visible_slot(first), Some(START));
+    pad.state.highlight(first, NEXT);
+    assert_eq!(pad.state.visible_slot(first), Some(NEXT));
+    pad.sample(0, 252);
+    assert_eq!(pad.state.visible_slot(first), None);
+    pad.state.update_selection(false, |_, _| Some(NEXT));
+
+    pad.sample(SPELL, 253);
+    pad.sample(SPELL, 503);
+    let reopened = pad.state.open(Wheel::Spells, || Some(START)).unwrap();
+    assert_eq!(pad.state.visible_slot(first), None);
+    assert_eq!(pad.state.visible_slot(reopened), Some(START));
+    pad.state.highlight(first, NEXT);
+    assert_eq!(pad.state.visible_slot(reopened), Some(START));
+    pad.observe(None, 504, Context::Interrupted);
+    assert_eq!(pad.state.visible_slot(reopened), None);
+}
+
+#[test]
 fn rapid_repress_preserves_each_release_for_a_separate_hud_update() {
     let mut pad = Pad::new();
     pad.sample(SPELL, 1);

@@ -6,9 +6,10 @@ use crate::icons::icon_manager::IconManager;
 use crate::items::Item;
 use crate::mouse::reset_cursor_pos;
 use crate::rendering::ITEM_WHEEL_DATA;
+use crate::rendering::details_card::DetailsCard;
 use crate::rendering::display_item::DisplayItem;
 use crate::rendering::wheel_renderer::{WheelType, render_wheel};
-use crate::settings::Settings;
+use crate::settings::{ItemNames, Settings};
 use crate::{guard, set_hwnd, set_selected_quick_item_index, set_selected_spell_index};
 use hudhook::{ImguiRenderLoop, RenderContext};
 use imgui::{Context, Ui, WindowFlags};
@@ -19,6 +20,8 @@ use crate::io::controller_state::{Slot, VisibleWheel};
 use crate::icons::texture_manager::TextureManager;
 use crate::rendering::popup_renderer::{add_popup, draw_popups};
 use crate::settings::display_settings::{DisplaySettings, PANEL_FONT_SIZE, panel_font_source};
+use crate::wheel_details::CardFields;
+use crate::wheel_details_data::{WheelDetailsData, details_enabled};
 
 pub struct RenderHook {
     font: FontId,
@@ -34,6 +37,9 @@ pub struct RenderHook {
     prev_layout: Option<(f32, f32, [f32; 2])>,
     prev_spells: Vec<Item>,
     prev_quick_items: Vec<Item>,
+    details_card: DetailsCard,
+    details_session: Option<(WheelType, Option<VisibleWheel>, bool, usize)>,
+    mouse_details_slot: Option<Slot>,
 }
 
 impl RenderHook {
@@ -52,6 +58,9 @@ impl RenderHook {
             prev_layout: None,
             prev_spells: vec![],
             prev_quick_items: vec![],
+            details_card: DetailsCard::default(),
+            details_session: None,
+            mouse_details_slot: None,
         }
     }
 
@@ -147,6 +156,7 @@ impl ImguiRenderLoop for RenderHook {
                 self.display_settings.reload_stage = 0;
                 self.prev_spells = vec![];
                 self.prev_quick_items = vec![];
+                self.details_card.clear();
                 TextureManager::unload_all();
                 IconManager::load(render_context);
                 tracing::info!("IconManager reloaded");
@@ -168,8 +178,8 @@ impl ImguiRenderLoop for RenderHook {
         }
         guard!(
             let font = ui.push_font(self.font.into());
-            let (mut wheel_type, controller_wheel, quick_items, spells) = ItemWheelData::get(|data|
-                (data.wheel_type, data.controller_wheel, data.quick_items.clone(), data.spells.clone())
+            let (mut wheel_type, controller_wheel, quick_items, spells, details) = ItemWheelData::get(|data|
+                (data.wheel_type, data.controller_wheel, data.quick_items.clone(), data.spells.clone(), data.details)
             );
             let stick = controller_wheel.and_then(controller::right_stick);
             if controller_wheel.is_some() && stick.is_none() {
@@ -261,19 +271,76 @@ impl ImguiRenderLoop for RenderHook {
                     self.prev_spells = spells;
                     self.prev_quick_items = quick_items;
 
+                    let preview = self.display_settings.shown;
+                    let session = details.player_context
+                        .filter(|_| details_enabled(&settings, visible_type))
+                        .filter(|_| !crate::in_menus() && (preview || crate::io::is_game_focused()))
+                        .map(|player| (visible_type, controller_wheel, preview, player));
+                    let show_card = session.is_some();
+                    if self.details_session != session {
+                        self.details_session = session;
+                        self.mouse_details_slot = None;
+                        self.details_card.clear();
+                    }
+
                     let draw_list = ui.get_window_draw_list();
-                    if self.display_settings.shown {
+                    let card_slot = if preview {
                         crate::rendering::wheel_renderer::render_wheel_preview(display_items, ui, &draw_list, self.preview_controller_style);
+                        if show_card {
+                            display_items.iter().find(|item| item.is_highlighted)
+                                .map(|item| item.slot).or(details.active(visible_type))
+                        } else {
+                            None
+                        }
                     } else if wheel_type != WheelType::None {
                         let highlight = render_wheel(display_items, ui, &draw_list, stick, self.controller_highlight);
                         if let Some(visible) = controller_wheel {
                             self.controller_highlight = highlight;
-                            if let Some(slot) = highlight {
-                                controller::highlight(visible, slot);
+                            if highlight.is_some() || show_card {
+                                controller::highlight(visible, highlight)
+                            } else {
+                                None
                             }
+                        } else if show_card {
+                            self.mouse_details_slot = highlight.or_else(|| {
+                                self.mouse_details_slot.filter(|slot| {
+                                    display_items.iter().any(|item| item.slot == *slot && item.is_highlighted)
+                                })
+                            });
+                            self.mouse_details_slot.or(details.active(visible_type))
+                        } else {
+                            None
                         }
                     } else {
                         crate::rendering::debug_renderer::draw_debug(ui, &draw_list);
+                        None
+                    };
+
+                    if show_card
+                        && let Some(slot) = card_slot
+                        && let Some(detail) = details.details(visible_type, slot)
+                        && let Some(fields) = CardFields::for_slot(detail, &settings)
+                        && let Some(highlighted) = display_items.iter().find(|item| item.slot == slot)
+                    {
+                        let names = match visible_type {
+                            WheelType::Spells => &self.prev_spells,
+                            _ => &self.prev_quick_items,
+                        };
+                        let center_name_visible = matches!(settings.item_names(), ItemNames::Center)
+                            && highlighted.is_highlighted && highlighted.icon.is_some()
+                            && IconManager::get_static_icons().is_some();
+                        let heading = if matches!(settings.item_names(), ItemNames::Hide) || center_name_visible {
+                            ""
+                        } else {
+                            names.iter().find(|item| item.index() == slot.index && item.id() == slot.param_id)
+                                .map_or("", Item::name)
+                        };
+                        self.details_card.update(slot, fields, heading);
+                        self.details_card.draw(
+                            ui, &draw_list, &settings, get_window_size(), display_items,
+                        );
+                    } else {
+                        self.details_card.clear();
                     }
                 });
 
@@ -303,6 +370,7 @@ pub struct ItemWheelData {
     pub quick_items: Vec<Item>,
     pub wheel_type: WheelType,
     pub controller_wheel: Option<VisibleWheel>,
+    pub details: WheelDetailsData,
 }
 
 impl ItemWheelData {
@@ -312,6 +380,7 @@ impl ItemWheelData {
             quick_items: vec![],
             wheel_type: WheelType::None,
             controller_wheel: None,
+            details: WheelDetailsData::default(),
         }
     }
 

@@ -39,7 +39,16 @@ impl Tab {
                 "name_tint",
             ],
             Self::Hdr => &["hdr_enabled", "hdr_ui_brightness", "hdr_ui_saturation"],
-            Self::Interface => &["settings_function_key", "settings_modifier"],
+            Self::Interface => &[
+                "settings_function_key",
+                "settings_modifier",
+                "wheel_details_wheels",
+                "wheel_details_fp_cost",
+                "wheel_details_stat_requirements",
+                "wheel_details_item_quantity",
+                "wheel_details_availability",
+                "wheel_details_position",
+            ],
         }
     }
 }
@@ -64,8 +73,14 @@ fn managed_document(s: &Settings) -> DocumentMut {
         text_shadows,
         hdr_enabled,
         settings_function_key,
-        settings_modifier
+        settings_modifier,
+        wheel_details_fp_cost,
+        wheel_details_stat_requirements,
+        wheel_details_item_quantity,
+        wheel_details_availability
     );
+    d["wheel_details_wheels"] = value(s.wheel_details_wheels.as_str());
+    d["wheel_details_position"] = value(s.wheel_details_position.as_str());
     macro_rules! number { ($($key:ident),*) => { $(d[stringify!($key)] = Item::Value(float_value(s.$key));)* }; }
     number!(
         icon_scale_multiplier,
@@ -218,7 +233,13 @@ pub fn visual_preview(base: &Settings, draft: &Settings) -> Settings {
         name_tint,
         hdr_enabled,
         hdr_ui_brightness,
-        hdr_ui_saturation
+        hdr_ui_saturation,
+        wheel_details_wheels,
+        wheel_details_fp_cost,
+        wheel_details_stat_requirements,
+        wheel_details_item_quantity,
+        wheel_details_availability,
+        wheel_details_position
     );
     out
 }

@@ -120,8 +120,12 @@ pub fn right_stick(wheel: VisibleWheel) -> Option<RightStick> {
     input.sample.map(|(sample, _)| sample.right_stick)
 }
 
-pub fn highlight(visible: VisibleWheel, slot: Slot) {
-    CONTROLLER.lock().unwrap().state.highlight(visible, slot);
+pub fn highlight(visible: VisibleWheel, slot: Option<Slot>) -> Option<Slot> {
+    let mut input = CONTROLLER.lock().unwrap();
+    if let Some(slot) = slot {
+        input.state.highlight(visible, slot);
+    }
+    input.state.visible_slot(visible)
 }
 
 pub fn update_wheel(

@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 use render_hook::RenderHook;
 
 pub mod display_item;
+mod details_card;
 pub mod wheel_renderer;
 pub mod debug_renderer;
 mod wrapped_text;

@@ -90,7 +90,75 @@ settings!(
     hdr_ui_saturation: f32,
     settings_function_key: String,
     settings_modifier: String,
+    wheel_details_wheels: DetailWheels,
+    wheel_details_fp_cost: bool,
+    wheel_details_stat_requirements: bool,
+    wheel_details_item_quantity: bool,
+    wheel_details_availability: bool,
+    wheel_details_position: DetailPosition,
 );
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetailWheels {
+    #[default]
+    Both,
+    Spell,
+    Item,
+    Off,
+}
+
+impl DetailWheels {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Both => "both",
+            Self::Spell => "spell",
+            Self::Item => "item",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetailPosition {
+    #[default]
+    Below,
+    Above,
+}
+
+impl DetailPosition {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Below => "below",
+            Self::Above => "above",
+        }
+    }
+}
+
+fn wheel_details_wheels() -> DetailWheels {
+    DetailWheels::default()
+}
+
+const fn wheel_details_fp_cost() -> bool {
+    true
+}
+
+const fn wheel_details_stat_requirements() -> bool {
+    true
+}
+
+const fn wheel_details_item_quantity() -> bool {
+    true
+}
+
+const fn wheel_details_availability() -> bool {
+    true
+}
+
+fn wheel_details_position() -> DetailPosition {
+    DetailPosition::default()
+}
 
 pub fn spell_wheel_enabled() -> bool {
     true

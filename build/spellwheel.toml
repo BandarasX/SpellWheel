@@ -97,3 +97,12 @@ hdr_ui_saturation = 1.0
 # Invalid startup bindings recover to Left Shift + F10 without rewriting this file.
 settings_function_key = "F10"
 settings_modifier = "left_shift"
+
+# Interface > Wheel details. Limits the card to both, spell, item, or off.
+wheel_details_wheels = "both"
+wheel_details_fp_cost = true
+wheel_details_stat_requirements = true
+wheel_details_item_quantity = true
+wheel_details_availability = true
+# Preferred placement: below or above.
+wheel_details_position = "below"

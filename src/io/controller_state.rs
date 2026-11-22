@@ -260,6 +260,14 @@ impl ControllerState {
         }
     }
 
+    pub fn visible_slot(&self, visible: VisibleWheel) -> Option<Slot> {
+        let session = self.session.as_ref()?;
+        if session.visible != visible || session.close.is_some() {
+            return None;
+        }
+        session.selection.highlighted.or(session.selection.initial)
+    }
+
     pub fn update_selection(
         &mut self,
         instant: bool,
