@@ -51,7 +51,7 @@ use crate::items::Item;
 use crate::keyboard::hook::{install_keyboard_and_mouse_hooks, reset_scroll};
 use crate::settings::Settings;
 use crate::settings::display_settings::display_settings_open;
-use crate::wheel_details_data::{SpellFp, WheelDetailsData, details_enabled};
+use crate::wheel_details_data::{SpellFp, WheelDetailsData, details_enabled, read_item_availability};
 use crate::xinput_hook::{install_xinput_hook, remove_xinput_hook, set_suppress_camera};
 use keyboard::listener::tick_listeners;
 
@@ -405,7 +405,8 @@ fn tick(_fd4: &FD4TaskData) {
         let mut details = WheelDetailsData::default();
         let read_spells = details_enabled(&settings, WheelType::Spells)
             && (selected_wheel_type == WheelType::Spells || preview_open);
-        let read_items = details_enabled(&settings, WheelType::QuickItems)
+        let item_card_enabled = details_enabled(&settings, WheelType::QuickItems);
+        let read_items = (item_card_enabled || settings.wheel_details_item_quantity)
             && (selected_wheel_type == WheelType::QuickItems || preview_open);
         if (read_spells || read_items)
             && !in_menus()
@@ -428,7 +429,12 @@ fn tick(_fd4: &FD4TaskData) {
             }
             if read_items {
                 details.active_item = active_slot(equipment, Wheel::QuickItems, &quick_item_data);
-                details.read_quick_items(param_repo, equipment, &quick_item_data, &settings);
+                let availability = if item_card_enabled && settings.wheel_details_availability {
+                    read_item_availability(world, &player.chr_ins, equipment, player_data.furlcalling_finger_remedy_active)
+                } else {
+                    Default::default()
+                };
+                details.read_quick_items(param_repo, equipment, &quick_item_data, &settings, availability);
             }
         }
 

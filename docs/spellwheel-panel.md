@@ -58,7 +58,7 @@ The card starts at the active slot of an open wheel and follows accepted highlig
 
 The card calculates initial cast **FP** from the spell row and active sorcery or incantation FP multipliers, then rounds the final cost up to the next whole FP when needed. **Insufficient FP** compares the live character FP against that displayed value. Each spell requirement uses muted green for a satisfied stat, muted red for an unmet stat, and neutral text when unavailable. Availability messages can be toggled independently of these colors.
 
-Quick items can show FP and HP from their goods row, and stat scaling from the linked virtual weapon. An item can show either field without an inventory quantity. Equipped consumables use the count from the associated inventory slot. **None remaining** requires an inventory record with a confirmed zero. A depleted slot may disappear from the game inventory and wheel altogether.
+Quick items can show FP and HP from their goods row, and stat scaling from the linked virtual weapon. **Availability messages** shows **Insufficient FP**, **Insufficient HP**, and **Cannot summon** together on one line when those conditions apply. **Item quantity** shows each finite item's count in the lower-right corner of its icon, including zero while the depleted item remains equipped. A slot that the game clears disappears from the wheel.
 
 The card centers each line. Its clearance from the wheel can decrease from 24 to 4 pixels before text shrinks to fit. The preferred side may fall back to the other side if that side has more space. Background transparency controls the charcoal fill, with 0% opaque and 100% hidden. Gold border is independent.
 

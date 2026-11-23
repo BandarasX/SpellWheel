@@ -4,7 +4,7 @@ use crate::rendering::details_card::DetailsCard;
 use crate::rendering::display_item::DisplayItem;
 use crate::rendering::wrapped_text::WrappedText;
 use crate::settings::DetailPosition;
-use crate::wheel_details::{CardFields, FpCost, SlotDetails};
+use crate::wheel_details::{CardFields, FpCost, ItemAvailability, SlotDetails};
 use imgui::{Condition, Context, DrawVert, FontSource, WindowFlags};
 
 fn frame(
@@ -127,6 +127,42 @@ fn production_card_wraps_within_viewport_and_keeps_its_wheel_facing_edge() {
     let no_fill = frame(&mut context, &mut card, &settings, [3440.0, 1440.0]);
     assert!(!color(&no_fill, [15, 13, 10, 128]));
     assert!(color(&no_fill, [168, 201, 161, 255]));
+    settings.font_scale_multiplier = 2.0;
+    let item = SlotDetails::QuickItem {
+        quantity: Some(0),
+        fp: Some(9),
+        hp: Some(30),
+        scaling: [None; 5],
+        availability: ItemAvailability {
+            current_fp: Some(0),
+            current_hp: Some(1),
+            summon_blocked: true,
+        },
+    };
+    card.update(
+        Slot {
+            index: 0,
+            param_id: 1,
+        },
+        CardFields::for_slot(item, &settings).unwrap(),
+        "Item",
+    );
+    let frame_with_warnings = frame(&mut context, &mut card, &settings, [1280.0, 720.0]);
+    let warning_vertices: Vec<_> = frame_with_warnings
+        .iter()
+        .filter(|vertex| vertex.col == [255, 184, 143, 255])
+        .collect();
+    assert!(!warning_vertices.is_empty());
+    let [min_y, max_y] = warning_vertices
+        .iter()
+        .fold([f32::INFINITY, f32::NEG_INFINITY], |[min, max], vertex| {
+            [min.min(vertex.pos[1]), max.max(vertex.pos[1])]
+        });
+    assert!(
+        max_y - min_y < 16.0,
+        "warning line spanned {} pixels",
+        max_y - min_y
+    );
     card.clear();
     assert!(frame(&mut context, &mut card, &settings, [1280.0, 720.0]).is_empty());
 }

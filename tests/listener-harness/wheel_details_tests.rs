@@ -1,7 +1,7 @@
 use crate::Settings;
 use crate::panel_model::{Draft, RuntimeSettings, Tab, parse};
 use crate::settings::{DetailPosition, DetailWheels};
-use crate::wheel_details::{CardFields, CardSpace, FpCost, SlotDetails};
+use crate::wheel_details::{CardFields, CardSpace, FpCost, ItemAvailability, SlotDetails};
 use toml_edit::Value;
 
 #[test]
@@ -99,13 +99,13 @@ fn spell_fp_uses_live_cost_and_warns_only_below_it() {
             cost: 0,
             current: Some(0)
         })),
-        Some(("0 FP".into(), ""))
+        Some(("0 FP".into(), String::new()))
     );
     let cost = modified_fp_cost(13, 0.75).unwrap();
     for (current, message) in [(None, ""), (Some(10), ""), (Some(9), "Insufficient FP")] {
         assert_eq!(
             text(Some(FpCost { cost, current })),
-            Some(("10 FP".into(), message))
+            Some(("10 FP".into(), message.into()))
         );
     }
 }
@@ -123,9 +123,12 @@ fn each_requirement_has_its_own_state_without_a_stat_message() {
     };
     let mut settings = Settings::default();
     let result = |settings: &Settings| CardFields::for_slot(details, settings).unwrap();
-    assert_eq!(result(&settings).text(), ("7 FP".into(), "Insufficient FP"));
+    assert_eq!(
+        result(&settings).text(),
+        ("7 FP".into(), "Insufficient FP".into())
+    );
     settings.wheel_details_availability = false;
-    assert_eq!(result(&settings).text(), ("7 FP".into(), ""));
+    assert_eq!(result(&settings).text(), ("7 FP".into(), String::new()));
     assert_eq!(
         result(&settings).requirements().collect::<Vec<_>>(),
         [
@@ -157,9 +160,11 @@ fn each_requirement_has_its_own_state_without_a_stat_message() {
 }
 
 #[test]
-fn item_cost_and_scaling_do_not_depend_on_quantity() {
+fn item_cost_and_scaling_do_not_depend_on_the_icon_count() {
     use crate::wheel_details::scaling_grade;
     let mut settings = Settings::default();
+    let no_scaling = [None; 5];
+    let magic_pot = [0.0, 0.0, 95.0, 0.0, 0.0].map(scaling_grade);
     let text = |quantity, fp, hp, scaling, settings: &Settings| {
         CardFields::for_slot(
             SlotDetails::QuickItem {
@@ -167,39 +172,23 @@ fn item_cost_and_scaling_do_not_depend_on_quantity() {
                 fp,
                 hp,
                 scaling,
+                availability: ItemAvailability::default(),
             },
             settings,
         )
         .map(CardFields::text)
     };
-    let no_scaling = [None; 5];
-    let magic_pot = [0.0, 0.0, 95.0, 0.0, 0.0].map(scaling_grade);
-    assert_eq!(text(None, None, None, no_scaling, &settings), None);
-    assert_eq!(
-        text(Some(0), Some(3), None, magic_pot, &settings),
-        Some((
-            "3 FP · 0 remaining · Scaling B INT".into(),
-            "None remaining"
-        ))
-    );
-    assert_eq!(
-        text(None, None, Some(660), no_scaling, &settings),
-        Some(("660 HP".into(), ""))
-    );
-    assert_eq!(
-        text(Some(12), None, None, no_scaling, &settings),
-        Some(("12 remaining".into(), ""))
-    );
+    for quantity in [None, Some(0), Some(12)] {
+        assert_eq!(text(quantity, None, None, no_scaling, &settings), None);
+        assert_eq!(
+            text(quantity, Some(3), None, magic_pot, &settings),
+            Some(("3 FP · Scaling B INT".into(), String::new()))
+        );
+    }
     settings.wheel_details_item_quantity = false;
     assert_eq!(
         text(Some(0), Some(3), None, magic_pot, &settings),
-        Some(("3 FP · Scaling B INT".into(), "None remaining"))
-    );
-    settings.wheel_details_availability = false;
-    assert_eq!(text(Some(0), None, None, no_scaling, &settings), None);
-    assert_eq!(
-        text(None, Some(3), None, magic_pot, &settings),
-        Some(("3 FP · Scaling B INT".into(), ""))
+        Some(("3 FP · Scaling B INT".into(), String::new()))
     );
     assert_eq!(
         [1.0, 25.0, 60.0, 90.0, 140.0, 175.0].map(scaling_grade),
@@ -212,6 +201,47 @@ fn item_cost_and_scaling_do_not_depend_on_quantity() {
             Some('S')
         ]
     );
+}
+
+#[test]
+fn item_warnings_combine_and_respect_live_thresholds_and_settings() {
+    let mut settings = Settings::default();
+    let status = |current_fp, current_hp, summon_blocked, settings: &Settings| {
+        CardFields::for_slot(
+            SlotDetails::QuickItem {
+                quantity: None,
+                fp: Some(9),
+                hp: Some(30),
+                scaling: [None; 5],
+                availability: ItemAvailability {
+                    current_fp,
+                    current_hp,
+                    summon_blocked,
+                },
+            },
+            settings,
+        )
+        .unwrap()
+        .text()
+        .1
+    };
+    assert_eq!(
+        status(Some(8), Some(29), true, &settings),
+        "Insufficient FP · Insufficient HP · Cannot summon"
+    );
+    assert_eq!(
+        status(Some(8), Some(30), false, &settings),
+        "Insufficient FP"
+    );
+    assert_eq!(
+        status(Some(9), Some(29), false, &settings),
+        "Insufficient HP"
+    );
+    assert_eq!(status(Some(9), Some(30), true, &settings), "Cannot summon");
+    assert_eq!(status(Some(9), Some(30), false, &settings), "");
+    assert_eq!(status(None, None, false, &settings), "");
+    settings.wheel_details_availability = false;
+    assert_eq!(status(Some(8), Some(29), true, &settings), "");
 }
 
 #[test]

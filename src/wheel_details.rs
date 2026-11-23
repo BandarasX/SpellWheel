@@ -98,7 +98,15 @@ pub enum SlotDetails {
         fp: Option<u16>,
         hp: Option<u16>,
         scaling: [Option<char>; 5],
+        availability: ItemAvailability,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ItemAvailability {
+    pub current_fp: Option<u32>,
+    pub current_hp: Option<u32>,
+    pub summon_blocked: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,10 +127,10 @@ pub struct CardFields {
     fp: Option<u16>,
     hp: Option<u16>,
     requirements: [Option<Requirement>; 3],
-    quantity: Option<u32>,
     scaling: [Option<char>; 5],
     insufficient_fp: bool,
-    none_remaining: bool,
+    insufficient_hp: bool,
+    cannot_summon: bool,
 }
 
 impl CardFields {
@@ -156,18 +164,24 @@ impl CardFields {
                     && matches!(fp, Some(FpCost { cost, current: Some(current) }) if current < u32::from(cost));
             }
             SlotDetails::QuickItem {
-                quantity,
                 fp,
                 hp,
                 scaling,
+                availability,
+                ..
             } => {
-                if settings.wheel_details_item_quantity {
-                    fields.quantity = quantity;
-                }
                 fields.fp = fp;
                 fields.hp = hp;
                 fields.scaling = scaling;
-                fields.none_remaining = settings.wheel_details_availability && quantity == Some(0);
+                if settings.wheel_details_availability {
+                    fields.insufficient_fp = fp
+                        .zip(availability.current_fp)
+                        .is_some_and(|(cost, current)| u32::from(cost) > current);
+                    fields.insufficient_hp = hp
+                        .zip(availability.current_hp)
+                        .is_some_and(|(cost, current)| u32::from(cost) > current);
+                    fields.cannot_summon = availability.summon_blocked;
+                }
             }
         }
         (fields != Self::default()).then_some(fields)
@@ -180,16 +194,13 @@ impl CardFields {
             .filter_map(|(stat, requirement)| Some((stat, requirement?)))
     }
 
-    pub fn text(self) -> (String, &'static str) {
+    pub fn text(self) -> (String, String) {
         let mut main = Vec::new();
         if let Some(fp) = self.fp {
             main.push(format!("{fp} FP"));
         }
         if let Some(hp) = self.hp {
             main.push(format!("{hp} HP"));
-        }
-        if let Some(quantity) = self.quantity {
-            main.push(format!("{quantity} remaining"));
         }
         let scaling: Vec<_> = ["STR", "DEX", "INT", "FAI", "ARC"]
             .into_iter()
@@ -200,13 +211,14 @@ impl CardFields {
             main.push(format!("Scaling {}", scaling.join(", ")));
         }
 
-        let status = if self.insufficient_fp {
-            "Insufficient FP"
-        } else if self.none_remaining {
-            "None remaining"
-        } else {
-            ""
-        };
-        (main.join(" · "), status)
+        let status: Vec<_> = [
+            (self.insufficient_fp, "Insufficient FP"),
+            (self.insufficient_hp, "Insufficient HP"),
+            (self.cannot_summon, "Cannot summon"),
+        ]
+        .into_iter()
+        .filter_map(|(show, message)| show.then_some(message))
+        .collect();
+        (main.join(" · "), status.join(" · "))
     }
 }

@@ -1,12 +1,15 @@
 use eldenring::cs::{
-    ChrIns, EquipGameData, EquipParamGoods, EquipParamWeapon, ItemCategory, Magic,
-    SoloParamRepository,
+    CSSessionManager, ChrIns, EquipGameData, EquipParamGoods, EquipParamWeapon, ItemCategory,
+    ItemId, Magic, ProtocolState, SoloParamRepository, WorldChrMan,
 };
+use fromsoftware_shared::FromStatic;
 
 use crate::io::controller_state::Slot;
 use crate::rendering::wheel_renderer::WheelType;
 use crate::settings::{DetailWheels, Settings};
-use crate::wheel_details::{FpCost, SlotDetails, modified_fp_cost, scaling_grade};
+use crate::wheel_details::{
+    FpCost, ItemAvailability, SlotDetails, modified_fp_cost, scaling_grade,
+};
 
 #[cfg(feature = "extra-memory-slots-support")]
 use crate::expanded_memory_slots::MAX_SPELL_RECORDS;
@@ -51,6 +54,42 @@ impl SpellFp {
     }
 }
 
+pub fn read_item_availability(
+    world: &WorldChrMan,
+    player: &ChrIns,
+    equipment: &EquipGameData,
+    remedy_active: bool,
+) -> ItemAvailability {
+    const SPIRIT_CALLING_BELL: u32 = 8158;
+    let manager = &world.summon_buddy_manager;
+    let multiplayer = unsafe { CSSessionManager::instance() }.is_ok_and(|session| {
+        matches!(
+            session.protocol_state,
+            ProtocolState::Ingame | ProtocolState::WaitReentryToMap
+        ) || session
+            .players
+            .iter()
+            .any(|entry| !entry.is_local_player && entry.base.steam_id != 0)
+    });
+    let bell = ItemId::new(ItemCategory::Goods, SPIRIT_CALLING_BELL).unwrap();
+    let has_bell = equipment
+        .equip_item_data
+        .inventory
+        .items_data
+        .get_entry(bell)
+        .is_some_and(|entry| entry.item_id == bell && entry.quantity > 0);
+    ItemAvailability {
+        current_fp: u32::try_from(player.modules.data.fp).ok(),
+        current_hp: u32::try_from(player.modules.data.hp).ok(),
+        summon_blocked: !manager.is_within_activation_range
+            || manager.player_has_alive_summon
+            || manager.item_use_cooldown_timer > 0.0
+            || remedy_active
+            || multiplayer
+            || !has_bell,
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct WheelDetailsData {
     spells: [Option<(u32, SlotDetails)>; MAX_SPELL_RECORDS],
@@ -76,6 +115,13 @@ impl WheelDetailsData {
             WheelType::Spells => self.active_spell,
             WheelType::QuickItems => self.active_item,
             WheelType::None => None,
+        }
+    }
+
+    pub fn quick_item_quantity(&self, slot: Slot) -> Option<u32> {
+        match self.details(WheelType::QuickItems, slot)? {
+            SlotDetails::QuickItem { quantity, .. } => quantity,
+            _ => None,
         }
     }
 
@@ -124,14 +170,13 @@ impl WheelDetailsData {
         equipment: &EquipGameData,
         equipped: &[(usize, u32)],
         settings: &Settings,
+        availability: ItemAvailability,
     ) {
         for &(index, id) in equipped {
             if let Some(entry) = self.quick_items.get_mut(index)
                 && let Some(goods) = param_repo.get::<EquipParamGoods>(id)
             {
-                let quantity = if goods.is_consume()
-                    && (settings.wheel_details_item_quantity || settings.wheel_details_availability)
-                {
+                let quantity = if goods.is_consume() && settings.wheel_details_item_quantity {
                     quick_item_quantity(equipment, index, id)
                 } else {
                     None
@@ -156,6 +201,12 @@ impl WheelDetailsData {
                         fp: positive_cost(goods.consume_mp()),
                         hp: positive_cost(goods.consume_hp()),
                         scaling,
+                        availability: ItemAvailability {
+                            // Goods types 7 and 8 are spirit summons, including puppets.
+                            summon_blocked: availability.summon_blocked
+                                && matches!(goods.goods_type(), 7 | 8),
+                            ..availability
+                        },
                     },
                 ));
             }
@@ -189,8 +240,22 @@ fn quick_item_quantity(equipment: &EquipGameData, index: usize, id: u32) -> Opti
     }
     let quick_slot = equipment.equip_item_data.quick_slots.get(index)?;
     let inventory = &equipment.equip_item_data.inventory.items_data;
-    let entry = inventory
-        .entry_at_slot(u32::try_from(quick_slot.index).ok()?)?
-        .as_option()?;
-    (entry.item_id == equipped_id).then_some(entry.quantity)
+    if let Some(entry) = u32::try_from(quick_slot.index)
+        .ok()
+        .and_then(|index| inventory.entry_at_slot(index))
+        .and_then(|entry| entry.as_option())
+        .filter(|entry| entry.item_id == equipped_id)
+    {
+        return Some(entry.quantity);
+    }
+    // A quick slot may still hold its item ID after the final copy is consumed.
+    // Check inventory by item ID before displaying zero for a stale index.
+    match inventory.find_item_idx(equipped_id) {
+        None => Some(0),
+        Some(index) => inventory
+            .entry_at_slot(index)?
+            .as_option()
+            .filter(|entry| entry.item_id == equipped_id)
+            .map(|entry| entry.quantity),
+    }
 }

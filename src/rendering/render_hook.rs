@@ -293,8 +293,13 @@ impl ImguiRenderLoop for RenderHook {
                     }
 
                     let draw_list = ui.get_window_draw_list();
+                    let show_quantities = visible_type == WheelType::QuickItems
+                        && settings.wheel_details_item_quantity;
+                    let quantity_for = |slot| show_quantities.then(|| details.quick_item_quantity(slot)).flatten();
                     let card_slot = if preview {
-                        crate::rendering::wheel_renderer::render_wheel_preview(display_items, ui, &draw_list, self.preview_controller_style);
+                        crate::rendering::wheel_renderer::render_wheel_preview(
+                            display_items, ui, &draw_list, self.preview_controller_style, quantity_for,
+                        );
                         if show_card {
                             self.preview_slot
                                 .filter(|_| visible_type == self.preview_type)
@@ -304,7 +309,9 @@ impl ImguiRenderLoop for RenderHook {
                             None
                         }
                     } else if wheel_type != WheelType::None {
-                        let highlight = render_wheel(display_items, ui, &draw_list, stick, self.controller_highlight);
+                        let highlight = render_wheel(
+                            display_items, ui, &draw_list, stick, self.controller_highlight, quantity_for,
+                        );
                         if let Some(visible) = controller_wheel {
                             self.controller_highlight = highlight;
                             if highlight.is_some() || show_card {

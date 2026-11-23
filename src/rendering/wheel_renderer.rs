@@ -259,6 +259,7 @@ pub fn render_wheel(
     draw_list: &DrawListMut,
     stick: Option<RightStick>,
     controller_highlight: Option<Slot>,
+    quantity_for: impl Fn(Slot) -> Option<u32>,
 ) -> Option<Slot> {
     let selection = angle_and_dist_sqr(stick);
     let mut selector_angle = selection.angle();
@@ -281,16 +282,16 @@ pub fn render_wheel(
         selector_angle = items[index].angle;
     }
 
-    draw_wheel(items, ui, draw_list, stick.is_some(), selector_angle, can_select);
+    draw_wheel(items, ui, draw_list, stick.is_some(), selector_angle, can_select, quantity_for);
     selected.map(|index| items[index].slot)
 }
 
 /// Draw the wheel behind settings with selection frozen.
-pub fn render_wheel_preview(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool) {
-    draw_wheel(items, ui, draw_list, controller_style, 0.0, false);
+pub fn render_wheel_preview(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool, quantity_for: impl Fn(Slot) -> Option<u32>) {
+    draw_wheel(items, ui, draw_list, controller_style, 0.0, false, quantity_for);
 }
 
-fn draw_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool, selector_angle: f32, can_select: bool) {
+fn draw_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, controller_style: bool, selector_angle: f32, can_select: bool, quantity_for: impl Fn(Slot) -> Option<u32>) {
     draw_debug(ui, draw_list);
     if items.is_empty() {
         return;
@@ -304,7 +305,7 @@ fn draw_wheel(items: &mut [DisplayItem], ui: &Ui, draw_list: &DrawListMut, contr
     let num_items = items.len();
     for item in items.iter_mut() {
         item.tick(&settings);
-        item.draw(&settings, ww, wh, img_dim, num_items, show_inner_ring, ui, draw_list);
+        item.draw(&settings, ww, wh, img_dim, num_items, show_inner_ring, ui, draw_list, quantity_for(item.slot));
     }
 }
 

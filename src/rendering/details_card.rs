@@ -25,6 +25,7 @@ struct CardContent {
     fields: CardFields,
     heading: String,
     rows: Vec<Vec<TextRun>>,
+    status: TextRun,
     layout: Option<(Layout, Option<MeasuredText>)>,
 }
 
@@ -61,6 +62,7 @@ struct MeasuredText {
 struct MeasuredLine {
     width: f32,
     y: f32,
+    font_scale: Option<f32>,
     runs: Vec<(f32, TextRun)>,
 }
 
@@ -98,13 +100,12 @@ impl DetailsCard {
                 requirements.insert(0, TextRun::new("Requires", TEXT));
                 rows.push(requirements);
             }
-            rows.push(vec![TextRun::new(status, [1.0, 0.72, 0.56, 1.0])]);
-
             self.content = Some(CardContent {
                 slot,
                 fields,
                 heading: heading.to_owned(),
                 rows,
+                status: TextRun::new(status, [1.0, 0.72, 0.56, 1.0]),
                 layout: None,
             });
         }
@@ -165,7 +166,10 @@ impl DetailsCard {
             .as_ref()
             .is_some_and(|(cached, _)| *cached == layout)
         {
-            content.layout = Some((layout, measure_text(ui, &content.rows, layout)));
+            content.layout = Some((
+                layout,
+                measure_text(ui, &content.rows, &content.status, layout),
+            ));
         }
 
         if let Some((_, Some(text))) = &content.layout {
@@ -198,6 +202,9 @@ impl DetailsCard {
 
                 ui.set_window_font_scale(text.font_scale);
                 for line in &text.lines {
+                    if let Some(scale) = line.font_scale {
+                        ui.set_window_font_scale(scale);
+                    }
                     let left = cx - line.width / 2.0;
                     for (offset, run) in &line.runs {
                         draw_list.add_text(
@@ -257,7 +264,12 @@ fn wrap_row(ui: &Ui, row: &[TextRun], width: f32) -> Vec<MeasuredLine> {
     lines
 }
 
-fn measure_text(ui: &Ui, rows: &[Vec<TextRun>], layout: Layout) -> Option<MeasuredText> {
+fn measure_text(
+    ui: &Ui,
+    rows: &[Vec<TextRun>],
+    status: &TextRun,
+    layout: Layout,
+) -> Option<MeasuredText> {
     let preferred_size =
         (layout.base_font_size * layout.font_multiplier * 0.75).clamp(MIN_CARD_FONT, 36.0);
     // The layout budget already allows the minimum wheel clearance. Shrink only if needed.
@@ -279,6 +291,28 @@ fn measure_text(ui: &Ui, rows: &[Vec<TextRun>], layout: Layout) -> Option<Measur
                 height += size;
             }
             lines.extend(row);
+        }
+        if !status.text.is_empty() {
+            if !lines.is_empty() {
+                height += CARD_ROW_GAP;
+            }
+            let width = ui.calc_text_size(&status.text)[0];
+            // Fit all warnings on one line, independently of the other rows.
+            let scale = ((layout.width - 1.0) / width).min(1.0);
+            ui.set_window_font_scale(font_scale * scale);
+            let mut line = MeasuredLine {
+                y: height,
+                font_scale: Some(font_scale * scale),
+                ..Default::default()
+            };
+            line.push(
+                &status.text,
+                status.color,
+                ui.calc_text_size(&status.text)[0],
+                0.0,
+            );
+            lines.push(line);
+            height += size * scale;
         }
         if height <= layout.height {
             return Some(MeasuredText {

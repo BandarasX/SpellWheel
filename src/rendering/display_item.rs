@@ -198,7 +198,7 @@ impl DisplayItem {
         self.last_tick = tick;
     }
 
-    pub fn draw(&self, settings: &Settings, ww: f32, wh: f32, img_dim: f32, num_items: usize, show_inner_ring: bool, ui: &Ui, draw_list: &DrawListMut) {
+    pub fn draw(&self, settings: &Settings, ww: f32, wh: f32, img_dim: f32, num_items: usize, show_inner_ring: bool, ui: &Ui, draw_list: &DrawListMut, quantity: Option<u32>) {
         let [cx, cy] = [ww / 2.0, wh / 2.0];
         
         let positions = Positions::new(&self.name, self.pos[0], self.pos[1], self.scale);
@@ -290,6 +290,9 @@ impl DisplayItem {
             .uv_max([x + w, y + h])
             .col(col)
             .build();
+        if let Some(quantity) = quantity {
+            draw_quantity(ui, draw_list, &positions, quantity);
+        }
     }
 
     fn draw_centered_name(&self, settings: &Settings, ui: &Ui, cx: f32, cy: f32) {
@@ -325,4 +328,30 @@ impl DisplayItem {
             .thickness(thickness * thickness_mul)
             .build();
     }
+}
+
+fn draw_quantity(ui: &Ui, draw_list: &DrawListMut, positions: &Positions, quantity: u32) {
+    let previous_size = ui.current_font_size();
+    let icon_width = positions.img_c2[0] - positions.img_c1[0];
+    let inset = (icon_width * 0.04).clamp(2.0, 6.0);
+    let available = icon_width - 2.0 * inset;
+    if previous_size <= 0.0 || available <= 1.0 {
+        return;
+    }
+    ui.set_window_font_scale(1.0);
+    let base_size = ui.current_font_size();
+    let size = (icon_width * 0.20).clamp(10.0, 32.0);
+    ui.set_window_font_scale(size / base_size);
+    let text = quantity.to_string();
+    let [width, height] = ui.calc_text_size(&text);
+    let fit = ((available - 1.0) / width.max(height)).min(1.0);
+    ui.set_window_font_scale(size * fit / base_size);
+    let [width, height] = ui.calc_text_size(&text);
+    let x = positions.img_c2[0] - inset - width;
+    let y = positions.img_c2[1] - inset - height;
+    for [dx, dy] in [[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]] {
+        draw_list.add_text([x + dx, y + dy], [0.0, 0.0, 0.0, 0.95], &text);
+    }
+    draw_list.add_text([x, y], [1.0, 0.98, 0.93, 1.0], &text);
+    ui.set_window_font_scale(previous_size / base_size);
 }
