@@ -91,6 +91,7 @@ settings!(
     settings_function_key: String,
     settings_modifier: String,
     wheel_details_wheels: DetailWheels,
+    wheel_details_show_name: bool,
     wheel_details_fp_cost: bool,
     wheel_details_stat_requirements: bool,
     wheel_details_item_quantity: bool,
@@ -140,6 +141,10 @@ impl DetailPosition {
 
 fn wheel_details_wheels() -> DetailWheels {
     DetailWheels::default()
+}
+
+const fn wheel_details_show_name() -> bool {
+    true
 }
 
 const fn wheel_details_fp_cost() -> bool {

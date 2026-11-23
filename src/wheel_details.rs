@@ -12,7 +12,7 @@ pub fn modified_fp_cost(base: i16, rate: f32) -> Option<u16> {
     if base < 0 || !rate.is_finite() || rate < 0.0 {
         return None;
     }
-    let cost = (f32::from(base) * rate).trunc();
+    let cost = (f32::from(base) * rate).ceil();
     (cost <= f32::from(u16::MAX)).then(|| cost as u16)
 }
 
@@ -32,7 +32,7 @@ pub fn scaling_grade(value: f32) -> Option<char> {
 
 pub const MIN_CARD_FONT: f32 = 12.0;
 pub const CARD_MARGIN: f32 = 5.0;
-pub const MIN_CARD_CLEARANCE: f32 = 6.0;
+pub const MIN_CARD_CLEARANCE: f32 = 4.0;
 const MAX_CARD_CLEARANCE: f32 = 24.0;
 pub const CARD_PADDING_Y: f32 = 5.0;
 pub const CARD_ROW_GAP: f32 = 2.0;

@@ -98,7 +98,7 @@ fn production_card_wraps_within_viewport_and_keeps_its_wheel_facing_edge() {
                     }
                 };
                 // Longer wrapped content can use the remaining travel toward the wheel.
-                assert!((near_edge(&short) - near_edge(&long)).abs() <= 18.01);
+                assert!((near_edge(&short) - near_edge(&long)).abs() <= 20.01);
                 assert!(long.iter().all(|vertex| {
                     let [x, y] = vertex.pos;
                     x > 0.0 && x < width && y > 0.0 && y < height

@@ -9,7 +9,7 @@ use crate::rendering::ITEM_WHEEL_DATA;
 use crate::rendering::details_card::DetailsCard;
 use crate::rendering::display_item::DisplayItem;
 use crate::rendering::wheel_renderer::{WheelType, render_wheel};
-use crate::settings::{ItemNames, Settings};
+use crate::settings::Settings;
 use crate::{guard, set_hwnd, set_selected_quick_item_index, set_selected_spell_index};
 use hudhook::{ImguiRenderLoop, RenderContext};
 use imgui::{Context, Ui, WindowFlags};
@@ -333,20 +333,17 @@ impl ImguiRenderLoop for RenderHook {
                             .and_then(|detail| CardFields::for_slot(detail, &settings))
                             .or_else(|| (preview && visible_type == WheelType::QuickItems)
                                 .then(CardFields::default))
-                        && let Some(highlighted) = display_items.iter().find(|item| item.slot == slot)
+                        && display_items.iter().any(|item| item.slot == slot)
                     {
-                        let names = match visible_type {
-                            WheelType::Spells => &self.prev_spells,
-                            _ => &self.prev_quick_items,
-                        };
-                        let center_name_visible = matches!(settings.item_names(), ItemNames::Center)
-                            && highlighted.is_highlighted && highlighted.icon.is_some()
-                            && IconManager::get_static_icons().is_some();
-                        let heading = if matches!(settings.item_names(), ItemNames::Hide) || center_name_visible {
-                            ""
-                        } else {
+                        let heading = if settings.wheel_details_show_name {
+                            let names = match visible_type {
+                                WheelType::Spells => &self.prev_spells,
+                                _ => &self.prev_quick_items,
+                            };
                             names.iter().find(|item| item.index() == slot.index && item.id() == slot.param_id)
                                 .map_or("", Item::name)
+                        } else {
+                            ""
                         };
                         self.details_card.update(slot, fields, heading);
                         self.details_card.draw(

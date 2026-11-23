@@ -45,6 +45,7 @@ Open **Interface → Wheel details** to preview the card and change its fields o
 | Key | Allowed values | Default |
 | --- | --- | --- |
 | `wheel_details_wheels` | `"both"`, `"spell"`, `"item"`, `"off"` | `"both"` |
+| `wheel_details_show_name` | `true`, `false` | `true` |
 | `wheel_details_fp_cost` | `true`, `false` | `true` |
 | `wheel_details_stat_requirements` | `true`, `false` | `true` |
 | `wheel_details_item_quantity` | `true`, `false` | `true` |
@@ -53,13 +54,13 @@ Open **Interface → Wheel details** to preview the card and change its fields o
 | `wheel_details_background_transparency` | Fraction from `0.0` to `1.0` | `0.06` (6%) |
 | `wheel_details_gold_border` | `true`, `false` | `true` |
 
-The card starts at the active slot of an open wheel and follows accepted highlights, including on-close selection before it commits. It uses the existing name placement. The default settings preview uses the current quick item and shows a preview message if it has no details. Opening the panel over a visible wheel keeps that wheel and its frozen highlight. Choosing which wheels show the card preserves each field setting.
+The card starts at the active slot of an open wheel and follows accepted highlights, including on-close selection before it commits. **Show card name** controls the name on the card. The `item_names` setting controls the name on the wheel. The default settings preview uses the current quick item and shows a preview message if it has no details. Opening the panel over a visible wheel keeps that wheel and its frozen highlight. Choosing which wheels show the card preserves each field setting.
 
-The card calculates initial cast **FP** from the spell row and active sorcery or incantation FP multipliers. **Insufficient FP** compares the live character FP against that displayed value. Exact parity with the game menu's rounding and handling of combined modifiers is pending in-game validation. Each spell requirement uses muted green for a satisfied stat, muted red for an unmet stat, and neutral text when unavailable. Availability messages can be toggled independently of these colors.
+The card calculates initial cast **FP** from the spell row and active sorcery or incantation FP multipliers, then rounds the final cost up to the next whole FP when needed. **Insufficient FP** compares the live character FP against that displayed value. Each spell requirement uses muted green for a satisfied stat, muted red for an unmet stat, and neutral text when unavailable. Availability messages can be toggled independently of these colors.
 
 Quick items can show FP and HP from their goods row, and stat scaling from the linked virtual weapon. An item can show either field without an inventory quantity. Equipped consumables use the count from the associated inventory slot. **None remaining** requires an inventory record with a confirmed zero. A depleted slot may disappear from the game inventory and wheel altogether.
 
-The card centers each line. Its clearance from the wheel can decrease from 24 to 6 pixels before text shrinks to fit. The preferred side may fall back to the other side if that side has more space. Background transparency controls the charcoal fill, with 0% opaque and 100% hidden. Gold border is independent.
+The card centers each line. Its clearance from the wheel can decrease from 24 to 4 pixels before text shrinks to fit. The preferred side may fall back to the other side if that side has more space. Background transparency controls the charcoal fill, with 0% opaque and 100% hidden. Gold border is independent.
 
 ## Project defaults and reset scope
 

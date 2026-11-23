@@ -535,6 +535,11 @@ impl DisplaySettings {
             );
             for (label, key, mut enabled) in [
                 (
+                    "Show card name",
+                    "wheel_details_show_name",
+                    s.wheel_details_show_name,
+                ),
+                (
                     "Spell FP cost",
                     "wheel_details_fp_cost",
                     s.wheel_details_fp_cost,

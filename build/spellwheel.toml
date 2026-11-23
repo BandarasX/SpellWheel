@@ -100,6 +100,7 @@ settings_modifier = "left_shift"
 
 # Interface > Wheel details. Limits the card to both, spell, item, or off.
 wheel_details_wheels = "both"
+wheel_details_show_name = true
 wheel_details_fp_cost = true
 wheel_details_stat_requirements = true
 wheel_details_item_quantity = true

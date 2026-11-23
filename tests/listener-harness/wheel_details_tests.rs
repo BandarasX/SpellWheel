@@ -6,8 +6,7 @@ use toml_edit::Value;
 
 #[test]
 fn legacy_details_defaults_and_interface_reset_preserve_other_values() {
-    let legacy =
-        "# My config\ncontroller_wheel_open_delay = 0.25\nname_tint = [0.5, 1.0, 1.0, 1.0]\n";
+    let legacy = "# My config\ncontroller_wheel_open_delay = 0.25\nname_tint = [0.5, 1.0, 1.0, 1.0]\nitem_names = 'hide'\n";
     let saved = parse(legacy).unwrap();
     assert_eq!(saved.wheel_details_wheels, DetailWheels::Both);
     assert_eq!(saved.wheel_details_position, DetailPosition::Below);
@@ -15,6 +14,7 @@ fn legacy_details_defaults_and_interface_reset_preserve_other_values() {
     assert!(saved.wheel_details_stat_requirements);
     assert!(saved.wheel_details_item_quantity);
     assert!(saved.wheel_details_availability);
+    assert!(saved.wheel_details_show_name);
     let mut draft = Draft::new(Some(legacy.into()), saved.clone());
     assert_eq!(draft.text, legacy);
 
@@ -27,6 +27,9 @@ fn legacy_details_defaults_and_interface_reset_preserve_other_values() {
     draft
         .set("wheel_details_position", Value::from("above"))
         .unwrap();
+    draft
+        .set("wheel_details_show_name", Value::from(false))
+        .unwrap();
     assert!(draft.switch_mode());
     assert!(draft.switch_mode());
     let mut runtime = RuntimeSettings::new(saved.clone());
@@ -38,6 +41,8 @@ fn legacy_details_defaults_and_interface_reset_preserve_other_values() {
     );
     assert!(!runtime.effective.wheel_details_fp_cost);
     assert!(runtime.effective.wheel_details_item_quantity);
+    assert!(!runtime.effective.wheel_details_show_name);
+    assert_eq!(runtime.effective.item_names, "hide");
     assert_eq!(runtime.saved, saved);
     runtime.commit(&draft.last_valid);
     assert_eq!(runtime.saved, parse(&draft.text).unwrap());
@@ -67,8 +72,11 @@ fn typed_card_settings_accept_each_choice_and_reject_unknown_values() {
 fn spell_fp_uses_live_cost_and_warns_only_below_it() {
     use crate::wheel_details::modified_fp_cost;
     assert_eq!(modified_fp_cost(13, 1.0), Some(13));
-    assert_eq!(modified_fp_cost(13, 0.75), Some(9));
-    assert_eq!(modified_fp_cost(13, 0.75 * 0.85), Some(8));
+    // Exact costs stay whole. Fractional costs round up even below the half point.
+    assert_eq!(modified_fp_cost(32, 0.75), Some(24));
+    assert_eq!(modified_fp_cost(7, 0.75), Some(6));
+    assert_eq!(modified_fp_cost(13, 0.75), Some(10));
+    assert_eq!(modified_fp_cost(13, 0.75 * 0.85), Some(9));
     assert_eq!(modified_fp_cost(13, 0.0), Some(0));
     assert_eq!(modified_fp_cost(-1, 1.0), None);
     assert_eq!(modified_fp_cost(13, f32::NAN), None);
@@ -93,10 +101,11 @@ fn spell_fp_uses_live_cost_and_warns_only_below_it() {
         })),
         Some(("0 FP".into(), ""))
     );
-    for (current, message) in [(None, ""), (Some(9), ""), (Some(8), "Insufficient FP")] {
+    let cost = modified_fp_cost(13, 0.75).unwrap();
+    for (current, message) in [(None, ""), (Some(10), ""), (Some(9), "Insufficient FP")] {
         assert_eq!(
-            text(Some(FpCost { cost: 9, current })),
-            Some(("9 FP".into(), message))
+            text(Some(FpCost { cost, current })),
+            Some(("10 FP".into(), message))
         );
     }
 }
@@ -209,7 +218,7 @@ fn item_cost_and_scaling_do_not_depend_on_quantity() {
 fn gap_compacts_before_card_height_on_both_sides() {
     for position in [DetailPosition::Above, DetailPosition::Below] {
         let card = 60.0;
-        for (gap, expected) in [(110.0, 24.0), (82.0, 17.0), (71.0, 6.0)] {
+        for (gap, expected) in [(110.0, 24.0), (82.0, 17.0), (69.0, 4.0)] {
             let bounds = match position {
                 DetailPosition::Above => [gap, 690.0],
                 DetailPosition::Below => [29.0, 720.0 - gap],
