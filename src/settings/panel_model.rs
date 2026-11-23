@@ -48,6 +48,8 @@ impl Tab {
                 "wheel_details_item_quantity",
                 "wheel_details_availability",
                 "wheel_details_position",
+                "wheel_details_background_transparency",
+                "wheel_details_gold_border",
             ],
         }
     }
@@ -77,7 +79,8 @@ fn managed_document(s: &Settings) -> DocumentMut {
         wheel_details_fp_cost,
         wheel_details_stat_requirements,
         wheel_details_item_quantity,
-        wheel_details_availability
+        wheel_details_availability,
+        wheel_details_gold_border
     );
     d["wheel_details_wheels"] = value(s.wheel_details_wheels.as_str());
     d["wheel_details_position"] = value(s.wheel_details_position.as_str());
@@ -89,7 +92,8 @@ fn managed_document(s: &Settings) -> DocumentMut {
         highlight_time,
         font_scale_multiplier,
         hdr_ui_brightness,
-        hdr_ui_saturation
+        hdr_ui_saturation,
+        wheel_details_background_transparency
     );
     for (key, color) in [
         ("icon_tint", s.icon_tint),
@@ -166,6 +170,12 @@ pub fn validate(s: &Settings) -> Result<(), String> {
         ("hdr_ui_brightness", s.hdr_ui_brightness, 50.0, 2000.0),
         ("hdr_ui_saturation", s.hdr_ui_saturation, 0.0, 2.0),
         (
+            "wheel_details_background_transparency",
+            s.wheel_details_background_transparency,
+            0.0,
+            1.0,
+        ),
+        (
             "controller_wheel_open_delay",
             s.controller_wheel_open_delay,
             0.0,
@@ -239,7 +249,9 @@ pub fn visual_preview(base: &Settings, draft: &Settings) -> Settings {
         wheel_details_stat_requirements,
         wheel_details_item_quantity,
         wheel_details_availability,
-        wheel_details_position
+        wheel_details_position,
+        wheel_details_background_transparency,
+        wheel_details_gold_border
     );
     out
 }

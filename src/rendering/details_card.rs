@@ -6,9 +6,14 @@ use crate::rendering::wrapped_text::WrappedText;
 use crate::settings::{ItemNames, Settings, Style};
 use crate::wheel_details::{
     CARD_MARGIN, CARD_PADDING_Y, CARD_ROW_GAP, CardFields, CardSpace, MIN_CARD_FONT,
+    RequirementState,
 };
 
 const CARD_PADDING_X: f32 = 10.0;
+const TEXT: [f32; 4] = [0.94, 0.91, 0.84, 1.0];
+const GOLD: [f32; 4] = [1.0, 0.89, 0.67, 1.0];
+const MUTED_GREEN: [f32; 4] = [0.66, 0.79, 0.63, 1.0];
+const MUTED_RED: [f32; 4] = [0.86, 0.60, 0.57, 1.0];
 
 #[derive(Default)]
 pub struct DetailsCard {
@@ -19,7 +24,7 @@ struct CardContent {
     slot: Slot,
     fields: CardFields,
     heading: String,
-    rows: [String; 3],
+    rows: Vec<Vec<TextRun>>,
     layout: Option<(Layout, Option<MeasuredText>)>,
 }
 
@@ -31,11 +36,32 @@ struct Layout {
     font_multiplier: f32,
 }
 
-#[derive(Clone, Copy)]
+struct TextRun {
+    text: String,
+    color: [f32; 4],
+}
+
+impl TextRun {
+    fn new(text: impl Into<String>, color: [f32; 4]) -> Self {
+        Self {
+            text: text.into(),
+            color,
+        }
+    }
+}
+
 struct MeasuredText {
     font_scale: f32,
+    font_size: f32,
     height: f32,
-    row_heights: [f32; 3],
+    lines: Vec<MeasuredLine>,
+}
+
+#[derive(Default)]
+struct MeasuredLine {
+    width: f32,
+    y: f32,
+    runs: Vec<(f32, TextRun)>,
 }
 
 impl DetailsCard {
@@ -48,11 +74,37 @@ impl DetailsCard {
             content.slot == slot && content.fields == fields && content.heading == heading
         }) {
             let (main, status) = fields.text();
+            let main = if fields == CardFields::default() {
+                "No item details to display".to_owned()
+            } else {
+                main
+            };
+            let mut rows = vec![
+                vec![TextRun::new(WrappedText::directional_line(heading), GOLD)],
+                vec![TextRun::new(main, TEXT)],
+            ];
+            let mut requirements: Vec<_> = fields
+                .requirements()
+                .map(|(stat, requirement)| {
+                    let color = match requirement.state {
+                        RequirementState::Met => MUTED_GREEN,
+                        RequirementState::Unmet => MUTED_RED,
+                        RequirementState::Unknown => TEXT,
+                    };
+                    TextRun::new(format!("{} {stat}", requirement.amount), color)
+                })
+                .collect();
+            if !requirements.is_empty() {
+                requirements.insert(0, TextRun::new("Requires", TEXT));
+                rows.push(requirements);
+            }
+            rows.push(vec![TextRun::new(status, [1.0, 0.72, 0.56, 1.0])]);
+
             self.content = Some(CardContent {
                 slot,
                 fields,
                 heading: heading.to_owned(),
-                rows: [WrappedText::directional_line(heading), main, status],
+                rows,
                 layout: None,
             });
         }
@@ -108,70 +160,132 @@ impl DetailsCard {
             base_font_size,
             font_multiplier: settings.font_scale_multiplier,
         };
-        if !content.layout.is_some_and(|(cached, _)| cached == layout) {
+        if !content
+            .layout
+            .as_ref()
+            .is_some_and(|(cached, _)| *cached == layout)
+        {
             content.layout = Some((layout, measure_text(ui, &content.rows, layout)));
         }
 
-        if let Some((_, Some(text))) = content.layout
-            && let Some(top) = space.top(text.height + 2.0 * CARD_PADDING_Y)
-        {
-            let left = cx - width / 2.0;
-            let from = [left, top];
-            let to = [left + width, top + text.height + 2.0 * CARD_PADDING_Y];
-            draw_list
-                .add_rect(from, to, [0.058, 0.051, 0.041, 0.94])
-                .rounding(7.0)
-                .filled(true)
-                .build();
-            draw_list
-                .add_rect(from, to, [0.58, 0.46, 0.26, 0.80])
-                .rounding(7.0)
-                .build();
+        if let Some((_, Some(text))) = &content.layout {
+            let card_height = text.height + 2.0 * CARD_PADDING_Y;
+            let reserve = 3.0 * text.font_size + 2.0 * (CARD_PADDING_Y + CARD_ROW_GAP);
+            if let Some(top) = space.top(card_height, reserve) {
+                let left = cx - width / 2.0;
+                let from = [left, top];
+                let to = [left + width, top + card_height];
+                draw_list
+                    .add_rect(
+                        from,
+                        to,
+                        [
+                            0.058,
+                            0.051,
+                            0.041,
+                            1.0 - settings.wheel_details_background_transparency,
+                        ],
+                    )
+                    .rounding(7.0)
+                    .filled(true)
+                    .build();
+                if settings.wheel_details_gold_border {
+                    draw_list
+                        .add_rect(from, to, [0.58, 0.46, 0.26, 0.80])
+                        .rounding(7.0)
+                        .build();
+                }
 
-            ui.set_window_font_scale(text.font_scale);
-            let text_x = left + CARD_PADDING_X;
-            let wrap = ui.push_text_wrap_pos_with_pos(text_x + layout.width);
-            let mut y = top + CARD_PADDING_Y;
-            let colors = [
-                [1.0, 0.89, 0.67, 1.0],
-                [0.94, 0.91, 0.84, 1.0],
-                [1.0, 0.72, 0.56, 1.0],
-            ];
-            for ((row, height), color) in content.rows.iter().zip(text.row_heights).zip(colors) {
-                if height > 0.0 {
-                    ui.set_cursor_screen_pos([text_x, y]);
-                    ui.text_colored(color, row);
-                    y += height + CARD_ROW_GAP;
+                ui.set_window_font_scale(text.font_scale);
+                for line in &text.lines {
+                    let left = cx - line.width / 2.0;
+                    for (offset, run) in &line.runs {
+                        draw_list.add_text(
+                            [left + offset, top + CARD_PADDING_Y + line.y],
+                            run.color,
+                            &run.text,
+                        );
+                    }
                 }
             }
-            wrap.end();
         }
         ui.set_window_font_scale(previous_font_size / base_font_size);
     }
 }
 
-fn measure_text(ui: &Ui, rows: &[String; 3], layout: Layout) -> Option<MeasuredText> {
+impl MeasuredLine {
+    fn push(&mut self, text: &str, color: [f32; 4], width: f32, space: f32) {
+        let x = self.width + if self.runs.is_empty() { 0.0 } else { space };
+        self.runs.push((x, TextRun::new(text, color)));
+        self.width = x + width;
+    }
+}
+
+fn wrap_row(ui: &Ui, row: &[TextRun], width: f32) -> Vec<MeasuredLine> {
+    let space = ui.calc_text_size(" ")[0];
+    let mut lines = Vec::new();
+    let mut line = MeasuredLine::default();
+    for run in row {
+        for word in run.text.split_whitespace() {
+            let word_width = ui.calc_text_size(word)[0];
+            if !line.runs.is_empty() && line.width + space + word_width > width {
+                lines.push(std::mem::take(&mut line));
+            }
+            if word_width <= width {
+                line.push(word, run.color, word_width, space);
+                continue;
+            }
+
+            // Some languages and modded names contain no whitespace.
+            let mut start = 0;
+            for (index, character) in word.char_indices() {
+                let next = index + character.len_utf8();
+                if index > start && ui.calc_text_size(&word[start..next])[0] > width {
+                    let part = &word[start..index];
+                    line.push(part, run.color, ui.calc_text_size(part)[0], space);
+                    lines.push(std::mem::take(&mut line));
+                    start = index;
+                }
+            }
+            let last = &word[start..];
+            line.push(last, run.color, ui.calc_text_size(last)[0], space);
+        }
+    }
+    if !line.runs.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+fn measure_text(ui: &Ui, rows: &[Vec<TextRun>], layout: Layout) -> Option<MeasuredText> {
     let preferred_size =
         (layout.base_font_size * layout.font_multiplier * 0.75).clamp(MIN_CARD_FONT, 36.0);
-    // Only reduce text size if the chosen side cannot hold the full wrapped card.
+    // The layout budget already allows the minimum wheel clearance. Shrink only if needed.
     for size in [preferred_size, MIN_CARD_FONT] {
         let font_scale = size / layout.base_font_size;
         ui.set_window_font_scale(font_scale);
-        let row_heights = rows.each_ref().map(|row| {
+        let mut height = 0.0;
+        let mut lines = Vec::new();
+        for row in rows {
+            let mut row = wrap_row(ui, row, layout.width);
             if row.is_empty() {
-                0.0
-            } else {
-                ui.calc_text_size_with_opts(row, false, layout.width)[1]
+                continue;
             }
-        });
-        let row_count = row_heights.iter().filter(|&&height| height > 0.0).count();
-        let height =
-            row_heights.iter().sum::<f32>() + row_count.saturating_sub(1) as f32 * CARD_ROW_GAP;
+            if !lines.is_empty() {
+                height += CARD_ROW_GAP;
+            }
+            for line in &mut row {
+                line.y = height;
+                height += size;
+            }
+            lines.extend(row);
+        }
         if height <= layout.height {
             return Some(MeasuredText {
                 font_scale,
+                font_size: size,
                 height,
-                row_heights,
+                lines,
             });
         }
     }

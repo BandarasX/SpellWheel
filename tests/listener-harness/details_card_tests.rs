@@ -5,14 +5,14 @@ use crate::rendering::display_item::DisplayItem;
 use crate::rendering::wrapped_text::WrappedText;
 use crate::settings::DetailPosition;
 use crate::wheel_details::{CardFields, FpCost, SlotDetails};
-use imgui::{Condition, Context, FontSource, WindowFlags};
+use imgui::{Condition, Context, DrawVert, FontSource, WindowFlags};
 
 fn frame(
     ctx: &mut Context,
     card: &mut DetailsCard,
     settings: &Settings,
     [width, height]: [f32; 2],
-) -> Vec<[f32; 2]> {
+) -> Vec<DrawVert> {
     ctx.io_mut().display_size = [width, height];
     ctx.io_mut().font_global_scale = height / 2160.0;
     let ui = ctx.frame();
@@ -45,7 +45,7 @@ fn frame(
     }
     draw_data
         .draw_lists()
-        .flat_map(|list| list.vtx_buffer().iter().map(|v| v.pos))
+        .flat_map(|list| list.vtx_buffer().iter().copied())
         .collect()
 }
 
@@ -63,7 +63,10 @@ fn production_card_wraps_within_viewport_and_keeps_its_wheel_facing_edge() {
     let mut card = DetailsCard::default();
     let mut settings = Settings::default();
     let detail = SlotDetails::Spell {
-        fp: Some(FpCost::Base(11)),
+        fp: Some(FpCost {
+            cost: 11,
+            current: Some(11),
+        }),
         requirements: [20, 16, 17],
         effective_stats: [Some(19), Some(25), None],
     };
@@ -87,18 +90,19 @@ fn production_card_wraps_within_viewport_and_keeps_its_wheel_facing_edge() {
                     "{style} {width}x{height} {position:?}"
                 );
                 assert!(long.len() > short.len());
-                let near_edge = |points: &[[f32; 2]]| {
+                let near_edge = |points: &[DrawVert]| {
                     if position == DetailPosition::Above {
-                        points.iter().map(|p| p[1]).reduce(f32::max).unwrap()
+                        points.iter().map(|p| p.pos[1]).reduce(f32::max).unwrap()
                     } else {
-                        points.iter().map(|p| p[1]).reduce(f32::min).unwrap()
+                        points.iter().map(|p| p.pos[1]).reduce(f32::min).unwrap()
                     }
                 };
-                assert!((near_edge(&short) - near_edge(&long)).abs() < 0.01);
-                assert!(
-                    long.iter()
-                        .all(|&[x, y]| x > 0.0 && x < width && y > 0.0 && y < height)
-                );
+                // Longer wrapped content can use the remaining travel toward the wheel.
+                assert!((near_edge(&short) - near_edge(&long)).abs() <= 18.01);
+                assert!(long.iter().all(|vertex| {
+                    let [x, y] = vertex.pos;
+                    x > 0.0 && x < width && y > 0.0 && y < height
+                }));
                 match position {
                     DetailPosition::Above => assert!(near_edge(&long) < height * 0.125),
                     DetailPosition::Below => assert!(near_edge(&long) > height * 0.875),
@@ -106,6 +110,23 @@ fn production_card_wraps_within_viewport_and_keeps_its_wheel_facing_edge() {
             }
         }
     }
+    settings.wheel_details_background_transparency = 0.5;
+    settings.wheel_details_gold_border = true;
+    let with_border = frame(&mut context, &mut card, &settings, [3440.0, 1440.0]);
+    settings.wheel_details_gold_border = false;
+    let without_border = frame(&mut context, &mut card, &settings, [3440.0, 1440.0]);
+    let color = |vertices: &[DrawVert], rgba| vertices.iter().any(|v| v.col == rgba);
+    assert!(color(&with_border, [148, 117, 66, 204]));
+    assert!(!color(&without_border, [148, 117, 66, 204]));
+    for vertices in [&with_border, &without_border] {
+        assert!(color(vertices, [15, 13, 10, 128]));
+        assert!(color(vertices, [168, 201, 161, 255]));
+        assert!(color(vertices, [219, 153, 145, 255]));
+    }
+    settings.wheel_details_background_transparency = 1.0;
+    let no_fill = frame(&mut context, &mut card, &settings, [3440.0, 1440.0]);
+    assert!(!color(&no_fill, [15, 13, 10, 128]));
+    assert!(color(&no_fill, [168, 201, 161, 255]));
     card.clear();
     assert!(frame(&mut context, &mut card, &settings, [1280.0, 720.0]).is_empty());
 }

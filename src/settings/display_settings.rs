@@ -341,9 +341,7 @@ impl DisplaySettings {
             ui.item_rect_max(),
         ));
         if ui.is_item_hovered() {
-            ui.tooltip_text(
-                "Enter an exact percentage, including values outside the slider range.",
-            );
+            ui.tooltip_text("Enter an exact percentage.");
         }
         if changed_slider || changed_entry {
             self.set(
@@ -536,7 +534,11 @@ impl DisplaySettings {
                 &["Both wheels", "Spell wheel only", "Item wheel only", "Off"],
             );
             for (label, key, mut enabled) in [
-                ("FP cost", "wheel_details_fp_cost", s.wheel_details_fp_cost),
+                (
+                    "Spell FP cost",
+                    "wheel_details_fp_cost",
+                    s.wheel_details_fp_cost,
+                ),
                 (
                     "Stat requirements",
                     "wheel_details_stat_requirements",
@@ -552,6 +554,11 @@ impl DisplaySettings {
                     "wheel_details_availability",
                     s.wheel_details_availability,
                 ),
+                (
+                    "Gold border",
+                    "wheel_details_gold_border",
+                    s.wheel_details_gold_border,
+                ),
             ] {
                 if ui.checkbox(label, &mut enabled) {
                     self.set(key, enabled);
@@ -564,6 +571,15 @@ impl DisplaySettings {
                 s.wheel_details_position.as_str(),
                 &["below", "above"],
                 &["Below", "Above"],
+            );
+            self.percent_slider(
+                ui,
+                "Background transparency (%)",
+                "wheel_details_background_transparency",
+                s.wheel_details_background_transparency,
+                1.0,
+                [0.0, 100.0],
+                "0% is opaque. 100% hides the charcoal fill.",
             );
         }
     }

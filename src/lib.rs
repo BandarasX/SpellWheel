@@ -51,7 +51,7 @@ use crate::items::Item;
 use crate::keyboard::hook::{install_keyboard_and_mouse_hooks, reset_scroll};
 use crate::settings::Settings;
 use crate::settings::display_settings::display_settings_open;
-use crate::wheel_details_data::{WheelDetailsData, details_enabled};
+use crate::wheel_details_data::{SpellFp, WheelDetailsData, details_enabled};
 use crate::xinput_hook::{install_xinput_hook, remove_xinput_hook, set_suppress_camera};
 use keyboard::listener::tick_listeners;
 
@@ -422,7 +422,9 @@ fn tick(_fd4: &FD4TaskData) {
                     player_data.effective_arcane,
                 ]
                 .map(|value| (value > 0).then_some(value));
-                details.read_spells(param_repo, &spell_data, stats, &settings);
+                let fp = (settings.wheel_details_fp_cost || settings.wheel_details_availability)
+                    .then(|| SpellFp::read(&player.chr_ins)).flatten();
+                details.read_spells(param_repo, &spell_data, stats, fp.as_ref(), &settings);
             }
             if read_items {
                 details.active_item = active_slot(equipment, Wheel::QuickItems, &quick_item_data);

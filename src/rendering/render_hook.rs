@@ -31,6 +31,7 @@ pub struct RenderHook {
     display_settings: DisplaySettings,
     prev_type: WheelType,
     preview_type: WheelType,
+    preview_slot: Option<Slot>,
     prev_controller_wheel: Option<VisibleWheel>,
     controller_highlight: Option<Slot>,
     preview_controller_style: bool,
@@ -52,6 +53,7 @@ impl RenderHook {
             display_settings: DisplaySettings::new(),
             prev_type: WheelType::None,
             preview_type: WheelType::None,
+            preview_slot: None,
             prev_controller_wheel: None,
             controller_highlight: None,
             preview_controller_style: true,
@@ -134,6 +136,13 @@ impl ImguiRenderLoop for RenderHook {
             if !was_open && self.display_settings.shown {
                 controller::interrupt();
                 self.preview_controller_style = self.prev_type == WheelType::None || self.prev_controller_wheel.is_some();
+                let visible_items: &[_] = match self.prev_type {
+                    WheelType::QuickItems => &self.display_quick_items,
+                    WheelType::Spells => &self.display_spells,
+                    WheelType::None => &[],
+                };
+                self.preview_slot = visible_items.iter().find(|item| item.is_highlighted)
+                    .map(|item| item.slot);
                 self.preview_type = match self.prev_type {
                     WheelType::None => WheelType::QuickItems,
                     visible_wheel => visible_wheel,
@@ -287,8 +296,10 @@ impl ImguiRenderLoop for RenderHook {
                     let card_slot = if preview {
                         crate::rendering::wheel_renderer::render_wheel_preview(display_items, ui, &draw_list, self.preview_controller_style);
                         if show_card {
-                            display_items.iter().find(|item| item.is_highlighted)
-                                .map(|item| item.slot).or(details.active(visible_type))
+                            self.preview_slot
+                                .filter(|_| visible_type == self.preview_type)
+                                .filter(|slot| display_items.iter().any(|item| item.slot == *slot))
+                                .or(details.active(visible_type))
                         } else {
                             None
                         }
@@ -318,8 +329,10 @@ impl ImguiRenderLoop for RenderHook {
 
                     if show_card
                         && let Some(slot) = card_slot
-                        && let Some(detail) = details.details(visible_type, slot)
-                        && let Some(fields) = CardFields::for_slot(detail, &settings)
+                        && let Some(fields) = details.details(visible_type, slot)
+                            .and_then(|detail| CardFields::for_slot(detail, &settings))
+                            .or_else(|| (preview && visible_type == WheelType::QuickItems)
+                                .then(CardFields::default))
                         && let Some(highlighted) = display_items.iter().find(|item| item.slot == slot)
                     {
                         let names = match visible_type {

@@ -64,7 +64,15 @@ fn typed_card_settings_accept_each_choice_and_reject_unknown_values() {
 }
 
 #[test]
-fn spells_distinguish_base_effective_zero_and_missing_costs() {
+fn spell_fp_uses_live_cost_and_warns_only_below_it() {
+    use crate::wheel_details::modified_fp_cost;
+    assert_eq!(modified_fp_cost(13, 1.0), Some(13));
+    assert_eq!(modified_fp_cost(13, 0.75), Some(9));
+    assert_eq!(modified_fp_cost(13, 0.75 * 0.85), Some(8));
+    assert_eq!(modified_fp_cost(13, 0.0), Some(0));
+    assert_eq!(modified_fp_cost(-1, 1.0), None);
+    assert_eq!(modified_fp_cost(13, f32::NAN), None);
+
     let settings = Settings::default();
     let text = |fp| {
         CardFields::for_slot(
@@ -79,25 +87,25 @@ fn spells_distinguish_base_effective_zero_and_missing_costs() {
     };
     assert_eq!(text(None), None);
     assert_eq!(
-        text(Some(FpCost::Base(0))).unwrap(),
-        ("0 Base FP".into(), String::new())
+        text(Some(FpCost {
+            cost: 0,
+            current: Some(0)
+        })),
+        Some(("0 FP".into(), ""))
     );
-    assert_eq!(
-        text(Some(FpCost::Base(7))).unwrap(),
-        ("7 Base FP".into(), String::new())
-    );
-    for (current, reason) in [(None, ""), (Some(7), ""), (Some(0), "Insufficient FP")] {
+    for (current, message) in [(None, ""), (Some(9), ""), (Some(8), "Insufficient FP")] {
         assert_eq!(
-            text(Some(FpCost::Effective { cost: 7, current })).unwrap(),
-            ("7 FP".into(), reason.into())
+            text(Some(FpCost { cost: 9, current })),
+            Some(("9 FP".into(), message))
         );
     }
 }
 
 #[test]
-fn grouped_requirements_and_status_visibility_are_independent() {
+fn each_requirement_has_its_own_state_without_a_stat_message() {
+    use crate::wheel_details::{Requirement, RequirementState::*};
     let details = SlotDetails::Spell {
-        fp: Some(FpCost::Effective {
+        fp: Some(FpCost {
             cost: 7,
             current: Some(3),
         }),
@@ -105,71 +113,138 @@ fn grouped_requirements_and_status_visibility_are_independent() {
         effective_stats: [Some(10), Some(19), None],
     };
     let mut settings = Settings::default();
-    let result =
-        |settings: &Settings| CardFields::for_slot(details, settings).map(CardFields::text);
-    assert_eq!(
-        result(&settings).unwrap(),
-        (
-            "7 FP · Requires 10 INT, 20 FAI, 15 ARC".into(),
-            "Insufficient FP · Unmet stat requirements (FAI)".into()
-        )
-    );
+    let result = |settings: &Settings| CardFields::for_slot(details, settings).unwrap();
+    assert_eq!(result(&settings).text(), ("7 FP".into(), "Insufficient FP"));
     settings.wheel_details_availability = false;
+    assert_eq!(result(&settings).text(), ("7 FP".into(), ""));
     assert_eq!(
-        result(&settings).unwrap(),
-        (
-            "7 FP · Requires 10 INT, 20 FAI, 15 ARC".into(),
-            String::new()
-        )
+        result(&settings).requirements().collect::<Vec<_>>(),
+        [
+            (
+                "INT",
+                Requirement {
+                    amount: 10,
+                    state: Met
+                }
+            ),
+            (
+                "FAI",
+                Requirement {
+                    amount: 20,
+                    state: Unmet
+                }
+            ),
+            (
+                "ARC",
+                Requirement {
+                    amount: 15,
+                    state: Unknown
+                }
+            ),
+        ]
     );
     settings.wheel_details_stat_requirements = false;
-    settings.wheel_details_fp_cost = false;
-    assert_eq!(result(&settings), None);
-    settings.wheel_details_availability = true;
-    assert_eq!(
-        result(&settings).unwrap(),
-        (
-            String::new(),
-            "Insufficient FP · Unmet stat requirements (FAI)".into()
-        )
-    );
+    assert_eq!(result(&settings).requirements().count(), 0);
 }
 
 #[test]
-fn item_counts_refresh_and_missing_is_distinct_from_zero() {
+fn item_cost_and_scaling_do_not_depend_on_quantity() {
+    use crate::wheel_details::scaling_grade;
     let mut settings = Settings::default();
-    let text = |quantity, settings: &Settings| {
-        CardFields::for_slot(SlotDetails::QuickItem { quantity }, settings).map(CardFields::text)
+    let text = |quantity, fp, hp, scaling, settings: &Settings| {
+        CardFields::for_slot(
+            SlotDetails::QuickItem {
+                quantity,
+                fp,
+                hp,
+                scaling,
+            },
+            settings,
+        )
+        .map(CardFields::text)
     };
+    let no_scaling = [None; 5];
+    let magic_pot = [0.0, 0.0, 95.0, 0.0, 0.0].map(scaling_grade);
+    assert_eq!(text(None, None, None, no_scaling, &settings), None);
     assert_eq!(
-        text(Some(12), &settings).unwrap(),
-        ("12 remaining".into(), String::new())
+        text(Some(0), Some(3), None, magic_pot, &settings),
+        Some((
+            "3 FP · 0 remaining · Scaling B INT".into(),
+            "None remaining"
+        ))
     );
     assert_eq!(
-        text(Some(0), &settings).unwrap(),
-        ("0 remaining".into(), "None remaining".into())
+        text(None, None, Some(660), no_scaling, &settings),
+        Some(("660 HP".into(), ""))
     );
-    assert_eq!(text(None, &settings), None);
+    assert_eq!(
+        text(Some(12), None, None, no_scaling, &settings),
+        Some(("12 remaining".into(), ""))
+    );
     settings.wheel_details_item_quantity = false;
-    assert_eq!(text(Some(12), &settings), None);
     assert_eq!(
-        text(Some(0), &settings).unwrap(),
-        (String::new(), "None remaining".into())
+        text(Some(0), Some(3), None, magic_pot, &settings),
+        Some(("3 FP · Scaling B INT".into(), "None remaining"))
     );
     settings.wheel_details_availability = false;
-    assert_eq!(text(Some(0), &settings), None);
+    assert_eq!(text(Some(0), None, None, no_scaling, &settings), None);
+    assert_eq!(
+        text(None, Some(3), None, magic_pot, &settings),
+        Some(("3 FP · Scaling B INT".into(), ""))
+    );
+    assert_eq!(
+        [1.0, 25.0, 60.0, 90.0, 140.0, 175.0].map(scaling_grade),
+        [
+            Some('E'),
+            Some('D'),
+            Some('C'),
+            Some('B'),
+            Some('A'),
+            Some('S')
+        ]
+    );
 }
 
 #[test]
-fn position_uses_the_same_wheel_edge_for_different_content_heights() {
-    let below = CardSpace::for_wheel(720.0, [120.0, 590.0], DetailPosition::Below);
-    assert_eq!(below.top(36.0), below.top(64.0));
-    let above = CardSpace::for_wheel(720.0, [120.0, 590.0], DetailPosition::Above);
+fn gap_compacts_before_card_height_on_both_sides() {
+    for position in [DetailPosition::Above, DetailPosition::Below] {
+        let card = 60.0;
+        for (gap, expected) in [(110.0, 24.0), (82.0, 17.0), (71.0, 6.0)] {
+            let bounds = match position {
+                DetailPosition::Above => [gap, 690.0],
+                DetailPosition::Below => [29.0, 720.0 - gap],
+            };
+            let space = CardSpace::for_wheel(720.0, bounds, position);
+            let top = space.top(card, card).unwrap();
+            let distance = match position {
+                DetailPosition::Above => bounds[0] - top - card,
+                DetailPosition::Below => top - bounds[1],
+            };
+            assert_eq!(distance, expected);
+        }
+    }
+}
+
+#[test]
+fn card_transparency_validates_and_previews_independently_of_border() {
+    let defaults = Settings::default();
+    assert_eq!(defaults.wheel_details_background_transparency, 0.06);
+    assert!(defaults.wheel_details_gold_border);
+    assert!(parse("wheel_details_background_transparency = 1.01").is_err());
+    let mut draft = Draft::new(Some(String::new()), defaults.clone());
+    draft
+        .set("wheel_details_background_transparency", Value::from(0.3175))
+        .unwrap();
+    draft
+        .set("wheel_details_gold_border", Value::from(false))
+        .unwrap();
+    let mut runtime = RuntimeSettings::new(defaults.clone());
+    runtime.preview(&draft.last_valid);
     assert_eq!(
-        above.top(36.0).unwrap() + 36.0,
-        above.top(64.0).unwrap() + 64.0
+        runtime.effective.wheel_details_background_transparency,
+        0.3175
     );
-    let fallback = CardSpace::for_wheel(720.0, [120.0, 690.0], DetailPosition::Below);
-    assert_eq!(fallback, above);
-    assert_eq!(fallback.top(110.0), None);
+    assert!(!runtime.effective.wheel_details_gold_border);
+    draft.reset(Some(Tab::Interface)).unwrap();
+    assert_eq!(draft.last_valid, defaults);
 }

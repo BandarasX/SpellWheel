@@ -1,19 +1,39 @@
 use crate::settings::{DetailPosition, Settings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FpCost {
-    Base(u16),
-    // The current bindings supply base cost only.
-    #[allow(dead_code)]
-    Effective {
-        cost: u16,
-        current: Option<u32>,
-    },
+pub struct FpCost {
+    pub cost: u16,
+    pub current: Option<u32>,
+}
+
+/// Apply the active category's multiplicative FP modifiers to the initial cast.
+/// Keep an invalid effect snapshot distinct from a valid zero-cost cast.
+pub fn modified_fp_cost(base: i16, rate: f32) -> Option<u16> {
+    if base < 0 || !rate.is_finite() || rate < 0.0 {
+        return None;
+    }
+    let cost = (f32::from(base) * rate).trunc();
+    (cost <= f32::from(u16::MAX)).then(|| cost as u16)
+}
+
+pub fn scaling_grade(value: f32) -> Option<char> {
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    Some(match value {
+        x if x >= 175.0 => 'S',
+        x if x >= 140.0 => 'A',
+        x if x >= 90.0 => 'B',
+        x if x >= 60.0 => 'C',
+        x if x >= 25.0 => 'D',
+        _ => 'E',
+    })
 }
 
 pub const MIN_CARD_FONT: f32 = 12.0;
 pub const CARD_MARGIN: f32 = 5.0;
-pub const CARD_CLEARANCE: f32 = 6.0;
+pub const MIN_CARD_CLEARANCE: f32 = 6.0;
+const MAX_CARD_CLEARANCE: f32 = 24.0;
 pub const CARD_PADDING_Y: f32 = 5.0;
 pub const CARD_ROW_GAP: f32 = 2.0;
 
@@ -31,13 +51,13 @@ impl CardSpace {
         preferred: DetailPosition,
     ) -> Self {
         let above = Self {
-            anchor_y: top - CARD_CLEARANCE,
-            height: top - CARD_CLEARANCE - CARD_MARGIN,
+            anchor_y: top - MIN_CARD_CLEARANCE,
+            height: top - MIN_CARD_CLEARANCE - CARD_MARGIN,
             position: DetailPosition::Above,
         };
         let below = Self {
-            anchor_y: bottom + CARD_CLEARANCE,
-            height: viewport_height - bottom - CARD_CLEARANCE - CARD_MARGIN,
+            anchor_y: bottom + MIN_CARD_CLEARANCE,
+            height: viewport_height - bottom - MIN_CARD_CLEARANCE - CARD_MARGIN,
             position: DetailPosition::Below,
         };
         let (preferred, opposite) = match preferred {
@@ -53,13 +73,15 @@ impl CardSpace {
         }
     }
 
-    pub fn top(self, height: f32) -> Option<f32> {
+    pub fn top(self, height: f32, reserve: f32) -> Option<f32> {
         if height > self.height {
             return None;
         }
+        let extra_gap =
+            (self.height - height.max(reserve)).clamp(0.0, MAX_CARD_CLEARANCE - MIN_CARD_CLEARANCE);
         Some(match self.position {
-            DetailPosition::Above => self.anchor_y - height,
-            DetailPosition::Below => self.anchor_y,
+            DetailPosition::Above => self.anchor_y - height - extra_gap,
+            DetailPosition::Below => self.anchor_y + extra_gap,
         })
     }
 }
@@ -73,23 +95,34 @@ pub enum SlotDetails {
     },
     QuickItem {
         quantity: Option<u32>,
+        fp: Option<u16>,
+        hp: Option<u16>,
+        scaling: [Option<char>; 5],
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequirementState {
+    Unknown,
+    Met,
+    Unmet,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Requirement {
+    pub amount: u8,
+    pub state: RequirementState,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CardFields {
-    fp: Option<FpCostLabel>,
-    requirements: [u8; 3],
+    fp: Option<u16>,
+    hp: Option<u16>,
+    requirements: [Option<Requirement>; 3],
     quantity: Option<u32>,
-    unmet: [bool; 3],
+    scaling: [Option<char>; 5],
     insufficient_fp: bool,
     none_remaining: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FpCostLabel {
-    Base(u16),
-    Effective(u16),
 }
 
 impl CardFields {
@@ -102,85 +135,78 @@ impl CardFields {
                 effective_stats,
             } => {
                 if settings.wheel_details_fp_cost {
-                    fields.fp = fp.map(|cost| match cost {
-                        FpCost::Base(cost) => FpCostLabel::Base(cost),
-                        FpCost::Effective { cost, .. } => FpCostLabel::Effective(cost),
-                    });
+                    fields.fp = fp.map(|fp| fp.cost);
                 }
                 if settings.wheel_details_stat_requirements {
-                    fields.requirements = requirements;
-                }
-                if settings.wheel_details_availability {
-                    fields.insufficient_fp = matches!(
-                        fp,
-                        Some(FpCost::Effective { cost, current: Some(current) })
-                            if current < u32::from(cost)
-                    );
-                    fields.unmet = std::array::from_fn(|index| {
-                        effective_stats[index]
-                            .is_some_and(|value| value < u32::from(requirements[index]))
+                    fields.requirements = std::array::from_fn(|index| {
+                        let amount = requirements[index];
+                        (amount != 0).then(|| Requirement {
+                            amount,
+                            state: match effective_stats[index] {
+                                Some(current) if current >= u32::from(amount) => {
+                                    RequirementState::Met
+                                }
+                                Some(_) => RequirementState::Unmet,
+                                None => RequirementState::Unknown,
+                            },
+                        })
                     });
                 }
+                fields.insufficient_fp = settings.wheel_details_availability
+                    && matches!(fp, Some(FpCost { cost, current: Some(current) }) if current < u32::from(cost));
             }
-            SlotDetails::QuickItem { quantity } => {
+            SlotDetails::QuickItem {
+                quantity,
+                fp,
+                hp,
+                scaling,
+            } => {
                 if settings.wheel_details_item_quantity {
                     fields.quantity = quantity;
                 }
+                fields.fp = fp;
+                fields.hp = hp;
+                fields.scaling = scaling;
                 fields.none_remaining = settings.wheel_details_availability && quantity == Some(0);
             }
         }
         (fields != Self::default()).then_some(fields)
     }
 
-    pub fn text(self) -> (String, String) {
-        use std::fmt::Write;
+    pub fn requirements(self) -> impl Iterator<Item = (&'static str, Requirement)> {
+        ["INT", "FAI", "ARC"]
+            .into_iter()
+            .zip(self.requirements)
+            .filter_map(|(stat, requirement)| Some((stat, requirement?)))
+    }
 
-        const STATS: [&str; 3] = ["INT", "FAI", "ARC"];
-        const SEPARATOR: &str = " · ";
-        let mut main = match self.fp {
-            Some(FpCostLabel::Base(cost)) => format!("{cost} Base FP"),
-            Some(FpCostLabel::Effective(cost)) => format!("{cost} FP"),
-            None => String::new(),
-        };
+    pub fn text(self) -> (String, &'static str) {
+        let mut main = Vec::new();
+        if let Some(fp) = self.fp {
+            main.push(format!("{fp} FP"));
+        }
+        if let Some(hp) = self.hp {
+            main.push(format!("{hp} HP"));
+        }
         if let Some(quantity) = self.quantity {
-            write!(main, "{quantity} remaining").unwrap();
+            main.push(format!("{quantity} remaining"));
         }
-        let mut requirements = self
-            .requirements
+        let scaling: Vec<_> = ["STR", "DEX", "INT", "FAI", "ARC"]
             .into_iter()
-            .zip(STATS)
-            .filter(|&(amount, _)| amount != 0);
-        if let Some((amount, stat)) = requirements.next() {
-            if !main.is_empty() {
-                main.push_str(SEPARATOR);
-            }
-            write!(main, "Requires {amount} {stat}").unwrap();
-            for (amount, stat) in requirements {
-                write!(main, ", {amount} {stat}").unwrap();
-            }
+            .zip(self.scaling)
+            .filter_map(|(stat, grade)| Some(format!("{} {stat}", grade?)))
+            .collect();
+        if !scaling.is_empty() {
+            main.push(format!("Scaling {}", scaling.join(", ")));
         }
 
-        let mut status = if self.insufficient_fp {
-            "Insufficient FP".to_owned()
+        let status = if self.insufficient_fp {
+            "Insufficient FP"
         } else if self.none_remaining {
-            "None remaining".to_owned()
+            "None remaining"
         } else {
-            String::new()
+            ""
         };
-        let mut unmet = STATS
-            .into_iter()
-            .zip(self.unmet)
-            .filter_map(|(stat, unmet)| unmet.then_some(stat));
-        if let Some(stat) = unmet.next() {
-            if !status.is_empty() {
-                status.push_str(SEPARATOR);
-            }
-            write!(status, "Unmet stat requirements ({stat}").unwrap();
-            for stat in unmet {
-                write!(status, ", {stat}").unwrap();
-            }
-            status.push(')');
-        }
-        (main, status)
+        (main.join(" · "), status)
     }
 }

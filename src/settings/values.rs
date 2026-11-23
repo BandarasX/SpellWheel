@@ -96,6 +96,8 @@ settings!(
     wheel_details_item_quantity: bool,
     wheel_details_availability: bool,
     wheel_details_position: DetailPosition,
+    wheel_details_background_transparency: f32,
+    wheel_details_gold_border: bool,
 );
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize)]
@@ -158,6 +160,14 @@ const fn wheel_details_availability() -> bool {
 
 fn wheel_details_position() -> DetailPosition {
     DetailPosition::default()
+}
+
+const fn wheel_details_background_transparency() -> f32 {
+    0.06
+}
+
+const fn wheel_details_gold_border() -> bool {
+    true
 }
 
 pub fn spell_wheel_enabled() -> bool {

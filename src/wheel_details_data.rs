@@ -1,15 +1,55 @@
-use eldenring::cs::{EquipGameData, EquipParamGoods, ItemCategory, Magic, SoloParamRepository};
+use eldenring::cs::{
+    ChrIns, EquipGameData, EquipParamGoods, EquipParamWeapon, ItemCategory, Magic,
+    SoloParamRepository,
+};
 
 use crate::io::controller_state::Slot;
 use crate::rendering::wheel_renderer::WheelType;
 use crate::settings::{DetailWheels, Settings};
-use crate::wheel_details::{FpCost, SlotDetails};
+use crate::wheel_details::{FpCost, SlotDetails, modified_fp_cost, scaling_grade};
 
 #[cfg(feature = "extra-memory-slots-support")]
 use crate::expanded_memory_slots::MAX_SPELL_RECORDS;
 #[cfg(not(feature = "extra-memory-slots-support"))]
 const MAX_SPELL_RECORDS: usize = 14;
 const QUICK_SLOTS: usize = 10;
+
+pub struct SpellFp {
+    rates: [f32; 2],
+    current: Option<u32>,
+}
+
+impl SpellFp {
+    pub fn read(player: &ChrIns) -> Option<Self> {
+        let mut rates = [1.0; 2];
+        // SpEffectParam separates sorcery and incantation consumption. Read active
+        // effects, which also covers temporary modifiers and both catalyst hands.
+        for (index, effect) in player.special_effect.entries().take(257).enumerate() {
+            if index == 256 {
+                return None;
+            }
+            let row = unsafe { effect.param_data?.as_ref() };
+            rates[0] *= row.magic_consumption_rate();
+            rates[1] *= row.miracle_consumption_rate();
+        }
+        Some(Self {
+            rates,
+            current: u32::try_from(player.modules.data.fp).ok(),
+        })
+    }
+
+    fn spell(&self, goods_type: u8, base: i16) -> Option<FpCost> {
+        let rate = match goods_type {
+            5 | 17 => self.rates[0],  // Sorcery
+            16 | 18 => self.rates[1], // Incantation
+            _ => return None,
+        };
+        Some(FpCost {
+            cost: modified_fp_cost(base, rate)?,
+            current: self.current,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 pub struct WheelDetailsData {
@@ -44,6 +84,7 @@ impl WheelDetailsData {
         param_repo: &SoloParamRepository,
         equipped: &[(usize, u32)],
         effective_stats: [Option<u32>; 3],
+        fp: Option<&SpellFp>,
         settings: &Settings,
     ) {
         if !settings.wheel_details_fp_cost
@@ -59,7 +100,12 @@ impl WheelDetailsData {
                 *entry = Some((
                     id,
                     SlotDetails::Spell {
-                        fp: u16::try_from(row.mp()).ok().map(FpCost::Base),
+                        fp: fp.and_then(|fp| {
+                            fp.spell(
+                                param_repo.get::<EquipParamGoods>(id)?.goods_type(),
+                                row.mp(),
+                            )
+                        }),
                         requirements: [
                             row.requirement_intellect(),
                             row.requirement_faith(),
@@ -79,17 +125,37 @@ impl WheelDetailsData {
         equipped: &[(usize, u32)],
         settings: &Settings,
     ) {
-        if !settings.wheel_details_item_quantity && !settings.wheel_details_availability {
-            return;
-        }
         for &(index, id) in equipped {
             if let Some(entry) = self.quick_items.get_mut(index)
-                && let Some(quantity) = quick_item_quantity(param_repo, equipment, index, id)
+                && let Some(goods) = param_repo.get::<EquipParamGoods>(id)
             {
+                let quantity = if goods.is_consume()
+                    && (settings.wheel_details_item_quantity || settings.wheel_details_availability)
+                {
+                    quick_item_quantity(equipment, index, id)
+                } else {
+                    None
+                };
+                let scaling = u32::try_from(goods.ref_virtual_wep_id())
+                    .ok()
+                    .and_then(|id| param_repo.get::<EquipParamWeapon>(id))
+                    .map_or([None; 5], |weapon| {
+                        [
+                            weapon.correct_strength(),
+                            weapon.correct_agility(),
+                            weapon.correct_magic(),
+                            weapon.correct_faith(),
+                            weapon.correct_luck(),
+                        ]
+                        .map(scaling_grade)
+                    });
                 *entry = Some((
                     id,
                     SlotDetails::QuickItem {
-                        quantity: Some(quantity),
+                        quantity,
+                        fp: positive_cost(goods.consume_mp()),
+                        hp: positive_cost(goods.consume_hp()),
+                        scaling,
                     },
                 ));
             }
@@ -108,21 +174,17 @@ pub fn details_enabled(settings: &Settings, wheel: WheelType) -> bool {
     )
 }
 
-fn quick_item_quantity(
-    param_repo: &SoloParamRepository,
-    equipment: &EquipGameData,
-    index: usize,
-    id: u32,
-) -> Option<u32> {
+fn positive_cost(value: i16) -> Option<u16> {
+    (value > 0).then(|| value as u16)
+}
+
+fn quick_item_quantity(equipment: &EquipGameData, index: usize, id: u32) -> Option<u32> {
     let equipped_id = equipment
         .equipment_entries
         .quick_tems
         .get(index)?
         .as_valid()?;
     if equipped_id.category() != ItemCategory::Goods || equipped_id.param_id() != id {
-        return None;
-    }
-    if !param_repo.get::<EquipParamGoods>(id)?.is_consume() {
         return None;
     }
     let quick_slot = equipment.equip_item_data.quick_slots.get(index)?;

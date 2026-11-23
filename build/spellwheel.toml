@@ -106,3 +106,6 @@ wheel_details_item_quantity = true
 wheel_details_availability = true
 # Preferred placement: below or above.
 wheel_details_position = "below"
+# Background transparency as a fraction (0.06 = 6%).
+wheel_details_background_transparency = 0.06
+wheel_details_gold_border = true
