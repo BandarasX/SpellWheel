@@ -245,6 +245,76 @@ fn item_warnings_combine_and_respect_live_thresholds_and_settings() {
 }
 
 #[test]
+fn active_ash_or_puppet_suppresses_only_its_own_summon_warning() {
+    let settings = Settings::default();
+    let ash = 203010;
+    let puppet = 206007;
+    let state = ItemAvailability {
+        current_fp: Some(5),
+        current_hp: Some(12),
+        summon_blocked: false,
+    };
+    let status = |availability| {
+        CardFields::for_slot(
+            SlotDetails::QuickItem {
+                quantity: None,
+                fp: Some(9),
+                hp: Some(30),
+                scaling: [None; 5],
+                availability,
+            },
+            &settings,
+        )
+        .unwrap()
+        .text()
+        .1
+    };
+    let resources = "Insufficient FP · Insufficient HP";
+    assert_eq!(status(state.for_goods(7, ash, None)), resources);
+    let blocked = ItemAvailability {
+        summon_blocked: true,
+        ..state
+    };
+    for (kind, id, other) in [(7, ash, puppet), (8, puppet, ash)] {
+        assert_eq!(status(blocked.for_goods(kind, id, Some(id))), resources);
+        assert_eq!(
+            status(blocked.for_goods(kind, id, Some(other))),
+            "Insufficient FP · Insufficient HP · Cannot summon"
+        );
+    }
+    assert_eq!(status(blocked.for_goods(0, ash, None)), resources);
+}
+
+#[test]
+fn quantity_font_scale_validates_and_follows_preview_save_and_reset() {
+    let settings = Settings::default();
+    assert_eq!(settings.wheel_details_quantity_font_scale, 1.0);
+    for valid in [0.25, 1.275, 3.0] {
+        assert_eq!(
+            parse(&format!("wheel_details_quantity_font_scale = {valid:?}"))
+                .unwrap()
+                .wheel_details_quantity_font_scale,
+            valid
+        );
+    }
+    for invalid in ["0.0", "3.01", "nan", "'large'"] {
+        assert!(parse(&format!("wheel_details_quantity_font_scale = {invalid}")).is_err());
+    }
+    let mut draft = Draft::new(Some(String::new()), settings.clone());
+    draft
+        .set("wheel_details_quantity_font_scale", Value::from(1.275))
+        .unwrap();
+    let mut runtime = RuntimeSettings::new(settings);
+    runtime.preview(&draft.last_valid);
+    assert_eq!(runtime.effective.wheel_details_quantity_font_scale, 1.275);
+    assert_eq!(runtime.saved.wheel_details_quantity_font_scale, 1.0);
+    runtime.commit(&draft.last_valid);
+    assert_eq!(runtime.saved.wheel_details_quantity_font_scale, 1.275);
+    draft.reset(Some(Tab::Interface)).unwrap();
+    assert_eq!(draft.last_valid.wheel_details_quantity_font_scale, 1.0);
+}
+
+#[test]
 fn gap_compacts_before_card_height_on_both_sides() {
     for position in [DetailPosition::Above, DetailPosition::Below] {
         let card = 60.0;

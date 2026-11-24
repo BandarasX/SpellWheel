@@ -95,6 +95,7 @@ settings!(
     wheel_details_fp_cost: bool,
     wheel_details_stat_requirements: bool,
     wheel_details_item_quantity: bool,
+    wheel_details_quantity_font_scale: f32,
     wheel_details_availability: bool,
     wheel_details_position: DetailPosition,
     wheel_details_background_transparency: f32,
@@ -157,6 +158,10 @@ const fn wheel_details_stat_requirements() -> bool {
 
 const fn wheel_details_item_quantity() -> bool {
     true
+}
+
+const fn wheel_details_quantity_font_scale() -> f32 {
+    1.0
 }
 
 const fn wheel_details_availability() -> bool {

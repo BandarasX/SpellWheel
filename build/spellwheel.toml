@@ -104,6 +104,7 @@ wheel_details_show_name = true
 wheel_details_fp_cost = true
 wheel_details_stat_requirements = true
 wheel_details_item_quantity = true
+wheel_details_quantity_font_scale = 1.0
 wheel_details_availability = true
 # Preferred placement: below or above.
 wheel_details_position = "below"

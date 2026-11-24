@@ -47,6 +47,7 @@ impl Tab {
                 "wheel_details_fp_cost",
                 "wheel_details_stat_requirements",
                 "wheel_details_item_quantity",
+                "wheel_details_quantity_font_scale",
                 "wheel_details_availability",
                 "wheel_details_position",
                 "wheel_details_background_transparency",
@@ -95,7 +96,8 @@ fn managed_document(s: &Settings) -> DocumentMut {
         font_scale_multiplier,
         hdr_ui_brightness,
         hdr_ui_saturation,
-        wheel_details_background_transparency
+        wheel_details_background_transparency,
+        wheel_details_quantity_font_scale
     );
     for (key, color) in [
         ("icon_tint", s.icon_tint),
@@ -178,6 +180,12 @@ pub fn validate(s: &Settings) -> Result<(), String> {
             1.0,
         ),
         (
+            "wheel_details_quantity_font_scale",
+            s.wheel_details_quantity_font_scale,
+            0.25,
+            3.0,
+        ),
+        (
             "controller_wheel_open_delay",
             s.controller_wheel_open_delay,
             0.0,
@@ -251,6 +259,7 @@ pub fn visual_preview(base: &Settings, draft: &Settings) -> Settings {
         wheel_details_fp_cost,
         wheel_details_stat_requirements,
         wheel_details_item_quantity,
+        wheel_details_quantity_font_scale,
         wheel_details_availability,
         wheel_details_position,
         wheel_details_background_transparency,

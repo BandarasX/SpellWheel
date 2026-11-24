@@ -1,6 +1,6 @@
 use eldenring::cs::{
     CSSessionManager, ChrIns, EquipGameData, EquipParamGoods, EquipParamWeapon, ItemCategory,
-    ItemId, Magic, ProtocolState, SoloParamRepository, WorldChrMan,
+    ItemId, LobbyState, Magic, ProtocolState, SoloParamRepository, WorldChrMan,
 };
 use fromsoftware_shared::FromStatic;
 
@@ -54,39 +54,62 @@ impl SpellFp {
     }
 }
 
+#[derive(Default)]
+pub struct QuickItemState {
+    availability: ItemAvailability,
+    active_summon: Option<u32>,
+}
+
 pub fn read_item_availability(
     world: &WorldChrMan,
     player: &ChrIns,
     equipment: &EquipGameData,
     remedy_active: bool,
-) -> ItemAvailability {
+) -> QuickItemState {
     const SPIRIT_CALLING_BELL: u32 = 8158;
     let manager = &world.summon_buddy_manager;
     let multiplayer = unsafe { CSSessionManager::instance() }.is_ok_and(|session| {
         matches!(
             session.protocol_state,
             ProtocolState::Ingame | ProtocolState::WaitReentryToMap
-        ) || session
-            .players
-            .iter()
-            .any(|entry| !entry.is_local_player && entry.base.steam_id != 0)
+        ) && (session.lobby_state == LobbyState::Client
+            || session.players.iter().any(|entry| {
+                !entry.is_local_player && !entry.join_wait && entry.base.steam_id != 0
+            }))
     });
-    let bell = ItemId::new(ItemCategory::Goods, SPIRIT_CALLING_BELL).unwrap();
-    let has_bell = equipment
-        .equip_item_data
-        .inventory
-        .items_data
-        .get_entry(bell)
-        .is_some_and(|entry| entry.item_id == bell && entry.quantity > 0);
-    ItemAvailability {
-        current_fp: u32::try_from(player.modules.data.fp).ok(),
-        current_hp: u32::try_from(player.modules.data.hp).ok(),
-        summon_blocked: !manager.is_within_activation_range
-            || manager.player_has_alive_summon
-            || manager.item_use_cooldown_timer > 0.0
-            || remedy_active
-            || multiplayer
-            || !has_bell,
+    let active_summon = if manager.player_has_alive_summon {
+        u32::try_from(manager.active_summon_goods_id)
+            .ok()
+            .filter(|&id| id != 0)
+    } else {
+        None
+    };
+    let summon_blocked = !manager.is_within_activation_range
+        || manager.player_has_alive_summon
+        || manager.item_use_cooldown_timer > 0.0
+        || remedy_active
+        || multiplayer
+        || {
+            // The bell is a persistent key item. The quick-item index can miss it,
+            // and a key item entry does not need to report a consumable quantity.
+            let bell = ItemId::new(ItemCategory::Goods, SPIRIT_CALLING_BELL).unwrap();
+            let mut keys = equipment
+                .equip_inventory_data
+                .items_data
+                .key_entries()
+                .iter()
+                .filter_map(|entry| entry.as_option());
+            keys.next().is_some_and(|first| {
+                first.item_id != bell && !keys.any(|entry| entry.item_id == bell)
+            })
+        };
+    QuickItemState {
+        availability: ItemAvailability {
+            current_fp: u32::try_from(player.modules.data.fp).ok(),
+            current_hp: u32::try_from(player.modules.data.hp).ok(),
+            summon_blocked,
+        },
+        active_summon,
     }
 }
 
@@ -170,7 +193,7 @@ impl WheelDetailsData {
         equipment: &EquipGameData,
         equipped: &[(usize, u32)],
         settings: &Settings,
-        availability: ItemAvailability,
+        state: QuickItemState,
     ) {
         for &(index, id) in equipped {
             if let Some(entry) = self.quick_items.get_mut(index)
@@ -201,12 +224,11 @@ impl WheelDetailsData {
                         fp: positive_cost(goods.consume_mp()),
                         hp: positive_cost(goods.consume_hp()),
                         scaling,
-                        availability: ItemAvailability {
-                            // Goods types 7 and 8 are spirit summons, including puppets.
-                            summon_blocked: availability.summon_blocked
-                                && matches!(goods.goods_type(), 7 | 8),
-                            ..availability
-                        },
+                        availability: state.availability.for_goods(
+                            goods.goods_type(),
+                            id,
+                            state.active_summon,
+                        ),
                     },
                 ));
             }

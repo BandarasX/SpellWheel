@@ -109,6 +109,14 @@ pub struct ItemAvailability {
     pub summon_blocked: bool,
 }
 
+impl ItemAvailability {
+    pub fn for_goods(mut self, goods_type: u8, goods_id: u32, active_summon: Option<u32>) -> Self {
+        // Goods types 7 and 8 are spirit summons, including puppets.
+        self.summon_blocked &= matches!(goods_type, 7 | 8) && active_summon != Some(goods_id);
+        self
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequirementState {
     Unknown,

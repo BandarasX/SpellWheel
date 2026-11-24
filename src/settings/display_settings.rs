@@ -569,6 +569,15 @@ impl DisplaySettings {
                     self.set(key, enabled);
                 }
             }
+            self.percent_slider(
+                ui,
+                "Quantity font size (%)",
+                "wheel_details_quantity_font_scale",
+                s.wheel_details_quantity_font_scale,
+                1.0,
+                [50.0, 200.0],
+                "100% uses the original icon-relative size. Exact entry supports 25% to 300%.",
+            );
             self.choice(
                 ui,
                 "Card position",

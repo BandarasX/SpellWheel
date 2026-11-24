@@ -49,6 +49,7 @@ Open **Interface → Wheel details** to preview the card and change its fields o
 | `wheel_details_fp_cost` | `true`, `false` | `true` |
 | `wheel_details_stat_requirements` | `true`, `false` | `true` |
 | `wheel_details_item_quantity` | `true`, `false` | `true` |
+| `wheel_details_quantity_font_scale` | Multiplier from `0.25` to `3.0` | `1.0` (100%) |
 | `wheel_details_availability` | `true`, `false` | `true` |
 | `wheel_details_position` | `"below"`, `"above"` | `"below"` |
 | `wheel_details_background_transparency` | Fraction from `0.0` to `1.0` | `0.06` (6%) |
@@ -58,7 +59,7 @@ The card starts at the active slot of an open wheel and follows accepted highlig
 
 The card calculates initial cast **FP** from the spell row and active sorcery or incantation FP multipliers, then rounds the final cost up to the next whole FP when needed. **Insufficient FP** compares the live character FP against that displayed value. Each spell requirement uses muted green for a satisfied stat, muted red for an unmet stat, and neutral text when unavailable. Availability messages can be toggled independently of these colors.
 
-Quick items can show FP and HP from their goods row, and stat scaling from the linked virtual weapon. **Availability messages** shows **Insufficient FP**, **Insufficient HP**, and **Cannot summon** together on one line when those conditions apply. **Item quantity** shows each finite item's count in the lower-right corner of its icon, including zero while the depleted item remains equipped. A slot that the game clears disappears from the wheel.
+Quick items can show FP and HP from their goods row, and stat scaling from the linked virtual weapon. **Availability messages** shows **Insufficient FP**, **Insufficient HP**, and **Cannot summon** together on one line when those conditions apply. The card for a currently summoned Spirit Ash or Puppet omits **Cannot summon**. **Item quantity** shows each finite item's count in the lower-right corner of its icon, including zero while the depleted item remains equipped. **Quantity font size** scales the count relative to the icon and fits it inside the icon. The slider spans 50% to 200%, with exact entry from 25% to 300%. A slot that the game clears disappears from the wheel.
 
 The card centers each line. Its clearance from the wheel can decrease from 24 to 4 pixels before text shrinks to fit. The preferred side may fall back to the other side if that side has more space. Background transparency controls the charcoal fill, with 0% opaque and 100% hidden. Gold border is independent.
 

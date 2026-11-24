@@ -291,7 +291,7 @@ impl DisplayItem {
             .col(col)
             .build();
         if let Some(quantity) = quantity {
-            draw_quantity(ui, draw_list, &positions, quantity);
+            draw_quantity(ui, draw_list, &positions, quantity, settings.wheel_details_quantity_font_scale);
         }
     }
 
@@ -330,7 +330,7 @@ impl DisplayItem {
     }
 }
 
-fn draw_quantity(ui: &Ui, draw_list: &DrawListMut, positions: &Positions, quantity: u32) {
+fn draw_quantity(ui: &Ui, draw_list: &DrawListMut, positions: &Positions, quantity: u32, font_scale: f32) {
     let previous_size = ui.current_font_size();
     let icon_width = positions.img_c2[0] - positions.img_c1[0];
     let inset = (icon_width * 0.04).clamp(2.0, 6.0);
@@ -340,7 +340,7 @@ fn draw_quantity(ui: &Ui, draw_list: &DrawListMut, positions: &Positions, quanti
     }
     ui.set_window_font_scale(1.0);
     let base_size = ui.current_font_size();
-    let size = (icon_width * 0.20).clamp(10.0, 32.0);
+    let size = (icon_width * 0.20).clamp(10.0, 32.0) * font_scale;
     ui.set_window_font_scale(size / base_size);
     let text = quantity.to_string();
     let [width, height] = ui.calc_text_size(&text);
