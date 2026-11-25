@@ -245,6 +245,34 @@ fn item_warnings_combine_and_respect_live_thresholds_and_settings() {
 }
 
 #[test]
+fn current_monument_clears_the_warning_before_the_first_summon() {
+    let settings = Settings::default();
+    for (monument_id, expected) in [
+        (0, "Cannot summon"),
+        (10000104, ""),
+        (u32::MAX, "Cannot summon"),
+    ] {
+        let availability = ItemAvailability {
+            current_fp: Some(100),
+            summon_blocked: !crate::wheel_details::summon_monument_available(monument_id),
+            ..Default::default()
+        };
+        let fields = CardFields::for_slot(
+            SlotDetails::QuickItem {
+                quantity: None,
+                fp: Some(40),
+                hp: None,
+                scaling: [None; 5],
+                availability: availability.for_goods(7, 221002, None),
+            },
+            &settings,
+        )
+        .unwrap();
+        assert_eq!(fields.text().1, expected);
+    }
+}
+
+#[test]
 fn active_ash_or_puppet_suppresses_only_its_own_summon_warning() {
     let settings = Settings::default();
     let ash = 203010;

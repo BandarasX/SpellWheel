@@ -109,6 +109,10 @@ pub struct ItemAvailability {
     pub summon_blocked: bool,
 }
 
+pub fn summon_monument_available(entity_id: u32) -> bool {
+    !matches!(entity_id, 0 | u32::MAX)
+}
+
 impl ItemAvailability {
     pub fn for_goods(mut self, goods_type: u8, goods_id: u32, active_summon: Option<u32>) -> Self {
         // Goods types 7 and 8 are spirit summons, including puppets.

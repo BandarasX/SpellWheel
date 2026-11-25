@@ -9,6 +9,7 @@ use crate::rendering::wheel_renderer::WheelType;
 use crate::settings::{DetailWheels, Settings};
 use crate::wheel_details::{
     FpCost, ItemAvailability, SlotDetails, modified_fp_cost, scaling_grade,
+    summon_monument_available,
 };
 
 #[cfg(feature = "extra-memory-slots-support")]
@@ -84,7 +85,9 @@ pub fn read_item_availability(
     } else {
         None
     };
-    let summon_blocked = !manager.is_within_activation_range
+    // The current stone is set before summoning. The activation-range flag
+    // stayed false in a usable area until the stone was assigned to a live spirit.
+    let summon_blocked = !summon_monument_available(manager.buddy_stone_entity_id)
         || manager.player_has_alive_summon
         || manager.item_use_cooldown_timer > 0.0
         || remedy_active
