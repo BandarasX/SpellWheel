@@ -58,6 +58,17 @@ The quantity size slider spans 50% to 200%, with exact entry from 25% to 300%. A
 
 The accepted candidate's default-feature Windows x64/MSVC cross-build passed 73 harness tests and 3 diagnostic transport tests, plus the Windows all-features check. Its DLL SHA-256 is `768ac9a038af5e724122907177a1caa4de1641137aef558b037e2b57d1f0b6e6`. The published DLL is a separate native build. Use its own `build-provenance.json` and `SHA256SUMS.txt` to identify it. Release packaging uses Rust nightly-2026-11-13 and locked dependencies. The Actions workflow tests before building or publishing.
 
+## Published release verification
+
+GitHub published `wheel-details-acb4084` on 25 November 2026 from `acb40842d402049279c2286e55a5d8882f3cb426`. The native Windows workflow passed 73 harness tests and 3 diagnostic transport tests before publishing. The release source matches the accepted candidate across runtime code, dependencies, assets, and tests. [Release](https://github.com/BandarasX/SpellWheel/releases/tag/wheel-details-acb4084) · [Windows Actions run](https://github.com/BandarasX/SpellWheel/actions/runs/45604476623)
+
+All five public assets were downloaded. The tag and build provenance match the release commit. The DLL is AMD64 PE32+, and the ZIP contains the same DLL bytes as the standalone download. [Build provenance](https://github.com/BandarasX/SpellWheel/releases/download/wheel-details-acb4084/build-provenance.json) · [Published checksums](https://github.com/BandarasX/SpellWheel/releases/download/wheel-details-acb4084/SHA256SUMS.txt)
+
+| Asset | SHA-256 |
+| --- | --- |
+| `spellwheel.dll` | `e4c6a435391e82598e7f01357c3a01ab9bae0b51e3f8070473bc7dbf84c71cbc` |
+| `spellwheel-wheel-details-windows-x64.zip` | `d713f249ea6e9dd94502ce95b50e811767276e05d8076567073d51a071de3382` |
+
 ## Focused smoke test
 
 1. Install just the DLL and keep your existing TOML. On both wheels, check short tap, hold, highlight changes, and normal and cancelled close.
