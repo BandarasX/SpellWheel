@@ -87,6 +87,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "controller-input-$($env:GITHUB_SHA.Substring(0, 7))"
-          gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Spell Wheel HDR - controller input ($($env:GITHUB_SHA.Substring(0, 7)))" --notes-file target/release/package/release-notes.md --latest target/release/spellwheel.dll target/release/package/spellwheel-controller-input-windows-x64.zip target/release/package/build-provenance.json target/release/package/SHA256SUMS.txt target/release/package/AtkinsonHyperlegible-OFL.txt
+          $tag = "wheel-details-$($env:GITHUB_SHA.Substring(0, 7))"
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Spell Wheel HDR - wheel details ($($env:GITHUB_SHA.Substring(0, 7)))" --notes-file target/release/package/release-notes.md --latest target/release/spellwheel.dll target/release/package/spellwheel-wheel-details-windows-x64.zip target/release/package/build-provenance.json target/release/package/SHA256SUMS.txt target/release/package/AtkinsonHyperlegible-OFL.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

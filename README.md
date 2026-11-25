@@ -12,6 +12,8 @@ The settings shortcut fix prevents one Left Shift + F10 release from toggling th
 
 Press **Left Shift + F10** by default to open the settings panel. Appearance, HDR, and Interface share a draft with the Advanced TOML editor. The panel can be moved and resized, and the wheel preview follows it when it opens or closes. See [settings, install instructions, and rollback](docs/spellwheel-panel.md).
 
+**Interface → Wheel details** configures the highlighted spell and item card, availability messages, and counts on finite-item icons. See the [wheel details release handoff](docs/spellwheel-wheel-details-handoff.md).
+
 <h2>Modded Spell Icons</h2>
 <p>
 In order to show icons of modded spells,
